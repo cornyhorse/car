@@ -17,9 +17,15 @@ class CarState:
     selected_model: str | None = None
     provider_lock: str | None = None
     provider_lock_mode: str = "strict"
+    route_mode: str = "model"
+    favorite_models: list[str] | None = None
     key_name: str = "openrouter_api_key"
     mattstash_cli: str = "mattstash"
     key_helper: str = ""
+
+    def __post_init__(self) -> None:
+        if self.favorite_models is None:
+            self.favorite_models = []
 
 
 def _state_from_dict(data: dict[str, Any]) -> CarState:
@@ -27,6 +33,15 @@ def _state_from_dict(data: dict[str, Any]) -> CarState:
     for key in state.__dataclass_fields__.keys():
         if key in data:
             setattr(state, key, data[key])
+
+    if not isinstance(state.favorite_models, list):
+        state.favorite_models = []
+    else:
+        state.favorite_models = [str(x) for x in state.favorite_models if str(x).strip()]
+
+    if state.route_mode not in {"model", "provider"}:
+        state.route_mode = "model"
+
     return state
 
 
@@ -95,6 +110,7 @@ def _apply_env_overrides(state: CarState) -> CarState:
     selected = os.environ.get("COPILOT_MODEL", "").strip()
     provider_lock = os.environ.get("CAR_PROVIDER_LOCK", "").strip()
     mode = os.environ.get("CAR_PROVIDER_LOCK_MODE", "").strip()
+    route_mode = os.environ.get("CAR_ROUTE_MODE", "").strip()
 
     if base_url:
         state.openrouter_base_url = base_url
@@ -106,6 +122,8 @@ def _apply_env_overrides(state: CarState) -> CarState:
         state.provider_lock = provider_lock
     if mode in {"strict", "prefer"}:
         state.provider_lock_mode = mode
+    if route_mode in {"model", "provider"}:
+        state.route_mode = route_mode
 
     return state
 

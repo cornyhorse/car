@@ -66,8 +66,16 @@ def copilot_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
     return env
 
 
-def exec_copilot(args: list[str], env: dict[str, str]) -> int:
-    if shutil.which("copilot"):
+def exec_copilot(
+    args: list[str],
+    env: dict[str, str],
+    backend: str | None = None,
+) -> int:
+    if backend == "gh":
+        cmd = ["gh", "copilot", *args]
+    elif backend == "copilot":
+        cmd = ["copilot", *args]
+    elif shutil.which("copilot"):
         cmd = ["copilot", *args]
     else:
         cmd = ["gh", "copilot", *args]
@@ -75,6 +83,6 @@ def exec_copilot(args: list[str], env: dict[str, str]) -> int:
     try:
         result = subprocess.run(cmd, env=env, check=False)
     except FileNotFoundError:
-        print("gh executable was not found.")
+        print("Copilot executable was not found.")
         return 1
     return result.returncode

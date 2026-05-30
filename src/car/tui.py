@@ -17,7 +17,7 @@ class ModelPicked(Message):
         super().__init__()
 
 
-class CarTui(App[tuple[str, str | None] | None]):  # pragma: no cover
+class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no cover
     CSS = """
     Screen { layout: vertical; }
     #content { height: 1fr; }
@@ -28,7 +28,10 @@ class CarTui(App[tuple[str, str | None] | None]):  # pragma: no cover
 
     BINDINGS = [
         Binding("enter", "pick_model", "Select Model"),
+        Binding("f", "toggle_favorite", "Toggle Favorite"),
         Binding("l", "toggle_lock", "Toggle Provider Lock"),
+        Binding("r", "toggle_route_mode", "Toggle Route Mode"),
+        Binding("a", "clear_provider_filter", "All Providers"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -37,11 +40,15 @@ class CarTui(App[tuple[str, str | None] | None]):  # pragma: no cover
         models: list[ModelEntry],
         selected_model: str | None,
         provider_lock: str | None,
+        favorite_models: list[str],
+        route_mode: str,
     ) -> None:
         super().__init__()
         self.models = models
         self.selected_model = selected_model
         self.provider_lock = provider_lock
+        self.favorite_models = list(dict.fromkeys(favorite_models))
+        self.route_mode = route_mode if route_mode in {"model", "provider"} else "model"
         self.current_provider_filter = provider_lock
         self.selected_provider_for_lock: str | None = provider_lock
 
@@ -60,7 +67,7 @@ class CarTui(App[tuple[str, str | None] | None]):  # pragma: no cover
         self._setup_table()
         self._load_models()
         self._set_status(
-            "Use arrow keys. Enter selects model. L toggles provider lock."
+            "Enter=select F=favorite L=provider lock R=route mode A=all providers"
         )
 
     def _build_provider_tree(self) -> None:
@@ -78,7 +85,17 @@ class CarTui(App[tuple[str, str | None] | None]):  # pragma: no cover
         table = self.query_one("#models", DataTable)
         table.clear(columns=True)
         table.add_columns(
-            "Model", "Provider", "Prompt/$1M", "Complete/$1M", "Context"
+            "Fav", "Model", "Provider", "Prompt/$1M", "Complete/$1M", "Context"
+        )
+
+    def _sorted_models(self, filtered: list[ModelEntry]) -> list[ModelEntry]:
+        return sorted(
+            filtered,
+            key=lambda m: (
+                m.model_id not in self.favorite_models,
+                m.provider,
+                m.model_id,
+            ),
         )
 
     def _load_models(self) -> None:
@@ -92,8 +109,11 @@ class CarTui(App[tuple[str, str | None] | None]):  # pragma: no cover
                 if m.provider == self.current_provider_filter
             ]
 
+        filtered = self._sorted_models(filtered)
+
         for model in filtered:
             table.add_row(
+                "*" if model.model_id in self.favorite_models else "",
                 model.model_id,
                 model.provider,
                 _fmt_price(model.prompt_per_million),
@@ -124,11 +144,17 @@ class CarTui(App[tuple[str, str | None] | None]):  # pragma: no cover
             return
 
         row_key = table.get_row_at(coord.row)
-        model_id = str(row_key[0])
-        provider = str(row_key[1])
+        model_id = str(row_key[1])
+        provider = str(row_key[2])
         self.selected_model = model_id
+        provider_lock = self.provider_lock
+        if self.route_mode == "model":
+            provider_lock = None
+        elif self.route_mode == "provider" and not provider_lock:
+            provider_lock = provider
+
         self.post_message(ModelPicked(model_id, provider))
-        self.exit((model_id, self.provider_lock))
+        self.exit((model_id, provider_lock, self.route_mode, self.favorite_models))
 
     def action_toggle_lock(self) -> None:
         provider = self.selected_provider_for_lock
@@ -144,6 +170,39 @@ class CarTui(App[tuple[str, str | None] | None]):  # pragma: no cover
             self.provider_lock = provider
             self._set_status(f"Provider lock enabled: {provider}")
 
+    def action_toggle_route_mode(self) -> None:
+        if self.route_mode == "model":
+            self.route_mode = "provider"
+            self._set_status("Route mode: provider+model")
+        else:
+            self.route_mode = "model"
+            self._set_status("Route mode: model-only")
+
+    def action_clear_provider_filter(self) -> None:
+        self.current_provider_filter = None
+        self.selected_provider_for_lock = None
+        self._load_models()
+        self._set_status("Provider filter: all")
+
+    def action_toggle_favorite(self) -> None:
+        table = self.query_one("#models", DataTable)
+        coord = table.cursor_coordinate
+        if coord.row is None:
+            self._set_status("No model selected")
+            return
+
+        row_key = table.get_row_at(coord.row)
+        model_id = str(row_key[1])
+
+        if model_id in self.favorite_models:
+            self.favorite_models = [m for m in self.favorite_models if m != model_id]
+            self._set_status(f"Removed favorite: {model_id}")
+        else:
+            self.favorite_models.append(model_id)
+            self._set_status(f"Added favorite: {model_id}")
+
+        self._load_models()
+
     def _set_status(self, value: str) -> None:
         self.query_one("#status", Static).update(Text(value))
 
@@ -158,10 +217,14 @@ def run_tui(
     models: list[ModelEntry],
     selected_model: str | None,
     provider_lock: str | None,
-) -> tuple[str, str | None] | None:
+    favorite_models: list[str],
+    route_mode: str,
+) -> tuple[str, str | None, str, list[str]] | None:
     app = CarTui(
         models=models,
         selected_model=selected_model,
         provider_lock=provider_lock,
+        favorite_models=favorite_models,
+        route_mode=route_mode,
     )
     return app.run()

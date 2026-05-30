@@ -90,6 +90,12 @@ def test_exec_copilot(monkeypatch):
     assert copilot.exec_copilot(["suggest"], {"A": "1"}) == 7
     assert seen["cmd"][:2] == ["gh", "copilot"]
 
+    assert copilot.exec_copilot(["suggest"], {"A": "1"}, backend="gh") == 7
+    assert seen["cmd"][:2] == ["gh", "copilot"]
+
+    assert copilot.exec_copilot(["suggest"], {"A": "1"}, backend="copilot") == 7
+    assert seen["cmd"][0] == "copilot"
+
     def boom(*args, **kwargs):
         raise FileNotFoundError
 

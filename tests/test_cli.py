@@ -44,6 +44,20 @@ def test_main_routes_subcommand(monkeypatch):
     assert cli.main(["env"]) == 8
 
 
+def test_main_routes_cli_flag_to_gh_backend(monkeypatch):
+    received = {"args": None, "backend": None}
+
+    def fake_launch(args, backend=None):
+        received["args"] = args
+        received["backend"] = backend
+        return 10
+
+    monkeypatch.setattr(cli, "launch_copilot", fake_launch)
+    assert cli.main(["--cli", "suggest", "hello"]) == 10
+    assert received["args"] == ["suggest", "hello"]
+    assert received["backend"] == "gh"
+
+
 def test_main_routes_help_to_local_parser(monkeypatch):
     seen = {"help": 0, "launch": 0}
 
@@ -190,6 +204,37 @@ def test_handle_model_use_current_unknown(monkeypatch):
     assert cli.handle_model(st, _args(action="nope")) == 1
 
 
+def test_handle_model_favorites_actions(monkeypatch):
+    st = CarState(favorite_models=["a/b"])
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+
+    assert cli.handle_model(st, _args(action="favorites")) == 0
+    assert cli.handle_model(st, _args(action="favorite-add", model_id="x/y")) == 0
+    assert "x/y" in st.favorite_models
+    before = list(st.favorite_models)
+    assert cli.handle_model(st, _args(action="favorite-add", model_id="x/y")) == 0
+    assert st.favorite_models == before
+
+    assert cli.handle_model(st, _args(action="favorite-remove", model_id="a/b")) == 0
+    assert "a/b" not in st.favorite_models
+
+    assert cli.handle_model(st, _args(action="favorite-use", model_id="x/y")) == 0
+    assert st.selected_model == "x/y"
+    assert cli.handle_model(st, _args(action="favorite-use", model_id="missing")) == 1
+
+
+def test_handle_model_favorites_empty(monkeypatch):
+    st = CarState(favorite_models=[])
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    assert cli.handle_model(st, _args(action="favorites")) == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "No favorite models set" in text_blob
+
+
 def test_handle_provider_branches(monkeypatch):
     st = CarState()
     c = _Console()
@@ -201,6 +246,9 @@ def test_handle_provider_branches(monkeypatch):
 
     assert cli.handle_provider(st, _args(action="mode", value="prefer")) == 0
     assert st.provider_lock_mode == "prefer"
+
+    assert cli.handle_provider(st, _args(action="route", value="provider")) == 0
+    assert st.route_mode == "provider"
 
     assert cli.handle_provider(st, _args(action="unlock")) == 0
     assert st.provider_lock is None
@@ -252,7 +300,7 @@ def test_handle_doctor_success_and_failure(monkeypatch):
 
 
 def test_handle_tui_paths(monkeypatch):
-    st = CarState(openrouter_base_url="u", provider_lock="aws")
+    st = CarState(openrouter_base_url="u", provider_lock="aws", route_mode="model")
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
 
@@ -261,7 +309,7 @@ def test_handle_tui_paths(monkeypatch):
     monkeypatch.setattr(cli, "run_tui", lambda *a: None)
     assert cli.handle_tui(st) == 0
 
-    monkeypatch.setattr(cli, "run_tui", lambda *a: ("x/y", "openai"))
+    monkeypatch.setattr(cli, "run_tui", lambda *a: ("x/y", "openai", "provider", ["x/y"]))
     saved = {"called": False}
     monkeypatch.setattr(
         cli,
@@ -271,6 +319,8 @@ def test_handle_tui_paths(monkeypatch):
     assert cli.handle_tui(st) == 0
     assert st.selected_model == "x/y"
     assert st.provider_lock == "openai"
+    assert st.route_mode == "provider"
+    assert st.favorite_models == ["x/y"]
     assert saved["called"] is True
 
 
@@ -304,7 +354,7 @@ def test_handle_config(monkeypatch):
 
 
 def test_launch_copilot_paths(monkeypatch):
-    st = CarState(selected_model="m", provider_lock="aws", provider_lock_mode="prefer")
+    st = CarState(selected_model="m", provider_lock="aws", provider_lock_mode="prefer", route_mode="provider")
     monkeypatch.setattr(cli, "load_state", lambda: st)
 
     c = _Console()
@@ -320,9 +370,10 @@ def test_launch_copilot_paths(monkeypatch):
 
     seen = {"args": None, "env": None}
 
-    def fake_exec(args, env):
+    def fake_exec(args, env, backend=None):
         seen["args"] = args
         seen["env"] = env
+        seen["backend"] = backend
         return 0
 
     monkeypatch.setattr(cli, "exec_copilot", fake_exec)
@@ -330,6 +381,7 @@ def test_launch_copilot_paths(monkeypatch):
     assert seen["args"] == ["suggest"]
     assert seen["env"]["CAR_PROVIDER_LOCK"] == "aws"
     assert seen["env"]["CAR_PROVIDER_LOCK_MODE"] == "prefer"
+    assert seen["env"]["CAR_ROUTE_MODE"] == "provider"
 
 
 def test_launch_copilot_missing_key_prints_helper(monkeypatch):
@@ -351,9 +403,28 @@ def test_launch_copilot_no_provider_lock(monkeypatch):
     monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
     monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
     monkeypatch.setattr(cli, "copilot_env", lambda *a: {})
-    monkeypatch.setattr(cli, "exec_copilot", lambda args, env: 3)
+    monkeypatch.setattr(cli, "exec_copilot", lambda args, env, backend=None: 3)
 
     assert cli.launch_copilot([]) == 3
+
+
+def test_launch_copilot_passes_backend(monkeypatch):
+    st = CarState(selected_model="m", provider_lock=None)
+    monkeypatch.setattr(cli, "load_state", lambda: st)
+    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "token")
+    monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
+    monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
+    monkeypatch.setattr(cli, "copilot_env", lambda *a: {})
+
+    seen = {"backend": None}
+
+    def fake_exec(_args, _env, backend=None):
+        seen["backend"] = backend
+        return 0
+
+    monkeypatch.setattr(cli, "exec_copilot", fake_exec)
+    assert cli.launch_copilot([], backend="gh") == 0
+    assert seen["backend"] == "gh"
 
 
 def test_print_models_and_format_price(monkeypatch):

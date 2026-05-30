@@ -115,6 +115,7 @@ Pass through arguments to gh copilot:
 
 ```bash
 car suggest "write a safer bash script"
+car --cli suggest "force gh copilot backend"
 ```
 
 Model commands:
@@ -124,6 +125,10 @@ car model refresh
 car model list
 car model use openai/gpt-4o-mini
 car model current
+car model favorites
+car model favorite-add anthropic/claude-3-haiku
+car model favorite-remove anthropic/claude-3-haiku
+car model favorite-use anthropic/claude-3-haiku
 ```
 
 Provider lock commands:
@@ -131,6 +136,8 @@ Provider lock commands:
 ```bash
 car provider lock aws-bedrock
 car provider mode strict
+car provider route model
+car provider route provider
 car provider current
 car provider unlock
 ```
@@ -145,8 +152,15 @@ Inside TUI:
 
 - Arrow keys navigate providers/models.
 - Enter selects model and exits.
+- F toggles favorite for selected model.
 - L toggles provider lock for current provider filter.
+- R toggles route mode:
+	- model: select model independent of provider lock
+	- provider: select model plus pinned provider lock
+- A clears provider filter back to all.
 - Q exits.
+
+Favorites are shown at the top of the model table for quick switching.
 
 Environment and diagnostics:
 
@@ -179,8 +193,10 @@ State stores:
 - openrouter_base_url
 - default_model
 - selected_model
+- favorite_models
 - provider_lock
 - provider_lock_mode
+- route_mode
 - key_name/mattstash settings
 
 ## Notes On Provider Lock

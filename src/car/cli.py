@@ -49,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
             - Running an unrecognized command passes args through to Copilot.
 
             CLI mode examples:
+            - `car --cli suggest "write a safer bash script"`
             - `car suggest "write a safer bash script"`
             - `car explain "docker compose run --rm car"`
 
@@ -62,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
             - First run: `car doctor` -> `car model refresh` -> `car`
             - Daily use: run `car`, then use `suggest` or `explain` flows
             - Change model: `car model list` then `car model use <model_id>`
+            - Favorite model: `car model favorite-add <model_id>`
             - Lock provider: `car provider lock <provider>`
 
             Troubleshooting:
@@ -81,9 +83,16 @@ def build_parser() -> argparse.ArgumentParser:
     model_sub.add_parser("ls", help="Alias for list")
     model_sub.add_parser("refresh", help="Refresh model cache from OpenRouter")
     model_sub.add_parser("current", help="Show current model")
+    model_sub.add_parser("favorites", help="List favorite models")
 
     use = model_sub.add_parser("use", help="Set selected model")
     use.add_argument("model_id")
+    fav_add = model_sub.add_parser("favorite-add", help="Add model to favorites")
+    fav_add.add_argument("model_id")
+    fav_rm = model_sub.add_parser("favorite-remove", help="Remove model from favorites")
+    fav_rm.add_argument("model_id")
+    fav_use = model_sub.add_parser("favorite-use", help="Use favorite model by id")
+    fav_use.add_argument("model_id")
 
     provider = sub.add_parser("provider", help="Provider lock commands")
     provider_sub = provider.add_subparsers(dest="action")
@@ -94,6 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
     lock.add_argument("provider")
     mode = provider_sub.add_parser("mode", help="Set provider lock mode")
     mode.add_argument("value", choices=["strict", "prefer"])
+    route = provider_sub.add_parser("route", help="Set routing mode")
+    route.add_argument("value", choices=["model", "provider"])
     provider_sub.add_parser("unlock", help="Clear provider lock")
     provider_sub.add_parser("current", help="Show current provider lock")
 
@@ -108,6 +119,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     parser = build_parser()
+
+    if argv and argv[0] == "--cli":
+        return launch_copilot(argv[1:], backend="gh")
 
     if argv and argv[0] in {"-h", "--help", "help"}:
         parser.print_help()
@@ -181,6 +195,36 @@ def handle_model(state: CarState, args: argparse.Namespace) -> int:
         console.print(selected_model(state))
         return 0
 
+    if action == "favorites":
+        if not state.favorite_models:
+            console.print("No favorite models set")
+            return 0
+        for model_id in state.favorite_models:
+            console.print(model_id)
+        return 0
+
+    if action == "favorite-add":
+        if args.model_id not in state.favorite_models:
+            state.favorite_models.append(args.model_id)
+            save_state(state)
+        console.print(f"Added favorite: {args.model_id}")
+        return 0
+
+    if action == "favorite-remove":
+        state.favorite_models = [m for m in state.favorite_models if m != args.model_id]
+        save_state(state)
+        console.print(f"Removed favorite: {args.model_id}")
+        return 0
+
+    if action == "favorite-use":
+        if args.model_id not in state.favorite_models:
+            console.print(f"Not in favorites: {args.model_id}")
+            return 1
+        state.selected_model = args.model_id
+        save_state(state)
+        console.print(f"Selected model: {args.model_id}")
+        return 0
+
     console.print("Unknown model action")
     return 1
 
@@ -200,6 +244,12 @@ def handle_provider(state: CarState, args: argparse.Namespace) -> int:
         console.print(f"Provider lock mode: {state.provider_lock_mode}")
         return 0
 
+    if action == "route":
+        state.route_mode = args.value
+        save_state(state)
+        console.print(f"Route mode: {state.route_mode}")
+        return 0
+
     if action == "unlock":
         state.provider_lock = None
         save_state(state)
@@ -210,6 +260,7 @@ def handle_provider(state: CarState, args: argparse.Namespace) -> int:
         lock = state.provider_lock or "<none>"
         console.print(f"provider_lock={lock}")
         console.print(f"provider_lock_mode={state.provider_lock_mode}")
+        console.print(f"route_mode={state.route_mode}")
         return 0
 
     return 1
@@ -222,6 +273,7 @@ def handle_env(state: CarState) -> int:
     console.print(f"COPILOT_PROVIDER_BASE_URL={state.openrouter_base_url}")
     console.print(f"COPILOT_MODEL={model}")
     console.print(f"CAR_PROVIDER_LOCK={state.provider_lock or ''}")
+    console.print(f"CAR_ROUTE_MODE={state.route_mode}")
     if key:
         console.print("COPILOT_PROVIDER_API_KEY=<set>")
     else:
@@ -286,17 +338,26 @@ def handle_tui(state: CarState) -> int:
             console.print(f"Refresh failed: {exc}")
             return 1
 
-    outcome = run_tui(rows, selected_model(state), state.provider_lock)
+    outcome = run_tui(
+        rows,
+        selected_model(state),
+        state.provider_lock,
+        state.favorite_models,
+        state.route_mode,
+    )
     if not outcome:
         return 0
 
-    model_id, provider_lock = outcome
+    model_id, provider_lock, route_mode, favorites = outcome
     state.selected_model = model_id
     state.provider_lock = provider_lock
+    state.route_mode = route_mode
+    state.favorite_models = favorites
     save_state(state)
 
     console.print(f"Selected model: {model_id}")
     console.print(f"Provider lock: {provider_lock or '<none>'}")
+    console.print(f"Route mode: {route_mode}")
     return 0
 
 
@@ -305,7 +366,10 @@ def handle_config() -> int:
     return 0
 
 
-def launch_copilot(copilot_args: list[str]) -> int:
+def launch_copilot(
+    copilot_args: list[str],
+    backend: str | None = None,
+) -> int:
     state = load_state()
     key = resolve_openrouter_key(state)
     if not key:
@@ -324,8 +388,9 @@ def launch_copilot(copilot_args: list[str]) -> int:
     if state.provider_lock:
         env["CAR_PROVIDER_LOCK"] = state.provider_lock
         env["CAR_PROVIDER_LOCK_MODE"] = state.provider_lock_mode
+    env["CAR_ROUTE_MODE"] = state.route_mode
 
-    return exec_copilot(copilot_args, env)
+    return exec_copilot(copilot_args, env, backend=backend)
 
 
 def ensure_models_fresh(state: CarState, max_age_hours: int = 24) -> None:

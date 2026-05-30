@@ -16,6 +16,8 @@ def test_load_state_defaults_when_missing(monkeypatch, tmp_path):
     assert result.openrouter_base_url == "https://openrouter.ai/api/v1"
     assert result.default_model == "openai/gpt-4o-mini"
     assert result.provider_lock_mode == "strict"
+    assert result.route_mode == "model"
+    assert result.favorite_models == []
 
 
 def test_load_state_from_file_and_env_override(monkeypatch, tmp_path):
@@ -25,6 +27,8 @@ def test_load_state_from_file_and_env_override(monkeypatch, tmp_path):
             "default_model": "x/y",
             "selected_model": "a/b",
             "provider_lock_mode": "strict",
+            "route_mode": "provider",
+            "favorite_models": ["a/b"],
         }),
         encoding="utf-8",
     )
@@ -34,6 +38,7 @@ def test_load_state_from_file_and_env_override(monkeypatch, tmp_path):
     monkeypatch.setenv("COPILOT_MODEL", "selected/by/env")
     monkeypatch.setenv("CAR_PROVIDER_LOCK", "aws-bedrock")
     monkeypatch.setenv("CAR_PROVIDER_LOCK_MODE", "prefer")
+    monkeypatch.setenv("CAR_ROUTE_MODE", "model")
 
     result = state.load_state()
 
@@ -41,6 +46,8 @@ def test_load_state_from_file_and_env_override(monkeypatch, tmp_path):
     assert result.selected_model == "selected/by/env"
     assert result.provider_lock == "aws-bedrock"
     assert result.provider_lock_mode == "prefer"
+    assert result.route_mode == "model"
+    assert result.favorite_models == ["a/b"]
 
 
 def test_load_state_ignores_invalid_lock_mode(monkeypatch, tmp_path):
@@ -52,6 +59,17 @@ def test_load_state_ignores_invalid_lock_mode(monkeypatch, tmp_path):
     result = state.load_state()
 
     assert result.provider_lock_mode == "strict"
+
+
+def test_load_state_ignores_invalid_route_mode(monkeypatch, tmp_path):
+    f = tmp_path / "state.json"
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    monkeypatch.setattr(state, "ensure_dirs", lambda: None)
+    monkeypatch.setenv("CAR_ROUTE_MODE", "invalid")
+
+    result = state.load_state()
+
+    assert result.route_mode == "model"
 
 
 def test_load_state_applies_base_url_override(monkeypatch, tmp_path):
@@ -81,11 +99,12 @@ def test_save_state_writes_json(monkeypatch, tmp_path):
     monkeypatch.setattr(state, "state_file", lambda: f)
     monkeypatch.setattr(state, "ensure_dirs", lambda: None)
 
-    payload = state.CarState(selected_model="abc")
+    payload = state.CarState(selected_model="abc", favorite_models=["abc"])
     state.save_state(payload)
 
     data = json.loads(f.read_text(encoding="utf-8"))
     assert data["selected_model"] == "abc"
+    assert data["favorite_models"] == ["abc"]
 
 
 def test_selected_model_prefers_selected_then_default():
@@ -157,3 +176,13 @@ def test_state_path_uses_state_file(monkeypatch, tmp_path):
     f = tmp_path / "x.json"
     monkeypatch.setattr(state, "state_file", lambda: f)
     assert state.state_path() == f
+
+
+def test_state_from_dict_sanitizes_favorites_and_route_mode():
+    result = state._state_from_dict({
+        "favorite_models": "bad",
+        "route_mode": "bad",
+    })
+
+    assert result.favorite_models == []
+    assert result.route_mode == "model"
