@@ -67,7 +67,11 @@ def copilot_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
 
 
 def exec_copilot(args: list[str], env: dict[str, str]) -> int:
-    cmd = ["gh", "copilot", *args]
+    if shutil.which("copilot"):
+        cmd = ["copilot", *args]
+    else:
+        cmd = ["gh", "copilot", *args]
+
     try:
         result = subprocess.run(cmd, env=env, check=False)
     except FileNotFoundError:

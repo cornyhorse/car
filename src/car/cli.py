@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from textwrap import dedent
 
 from rich.console import Console
 from rich.table import Table
@@ -35,7 +36,42 @@ console = Console()
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="car", add_help=True)
+    parser = argparse.ArgumentParser(
+        prog="car",
+        add_help=True,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=dedent(
+            """
+            car wraps Copilot CLI with OpenRouter model + provider controls.
+
+            Default behavior:
+            - Running `car` with no args launches Copilot in interactive mode.
+            - Running an unrecognized command passes args through to Copilot.
+
+            CLI mode examples:
+            - `car suggest "write a safer bash script"`
+            - `car explain "docker compose run --rm car"`
+
+            car management examples:
+            - `car doctor`                     # verify gh/auth/key/cache
+            - `car model list`                 # show cached models/pricing
+            - `car model refresh`              # force refresh pricing cache
+            - `car --update`                   # re-run installer update flow
+
+            Common workflows:
+            - First run: `car doctor` -> `car model refresh` -> `car`
+            - Daily use: run `car`, then use `suggest` or `explain` flows
+            - Change model: `car model list` then `car model use <model_id>`
+            - Lock provider: `car provider lock <provider>`
+
+            Troubleshooting:
+            - Missing auth: run `gh auth login`
+            - Missing key: store in mattstash or set OPENROUTER_API_KEY
+            - Empty cache: run `car model refresh`
+            - Update wrapper/tools: run `car --update`
+            """
+        ).strip(),
+    )
     sub = parser.add_subparsers(dest="command")
 
     model = sub.add_parser("model", help="Model management")
@@ -72,6 +108,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     parser = build_parser()
+
+    if argv and argv[0] in {"-h", "--help", "help"}:
+        parser.print_help()
+        return 0
 
     if not argv:
         return launch_copilot([])

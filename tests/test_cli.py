@@ -44,6 +44,37 @@ def test_main_routes_subcommand(monkeypatch):
     assert cli.main(["env"]) == 8
 
 
+def test_main_routes_help_to_local_parser(monkeypatch):
+    seen = {"help": 0, "launch": 0}
+
+    class _Parser:
+        def print_help(self):
+            seen["help"] += 1
+
+    monkeypatch.setattr(cli, "build_parser", lambda: _Parser())
+    monkeypatch.setattr(
+        cli,
+        "launch_copilot",
+        lambda args: seen.update({"launch": seen["launch"] + 1}) or 9,
+    )
+
+    assert cli.main(["--help"]) == 0
+    assert seen["help"] == 1
+    assert seen["launch"] == 0
+
+
+def test_main_routes_help_alias_to_local_parser(monkeypatch):
+    seen = {"help": 0}
+
+    class _Parser:
+        def print_help(self):
+            seen["help"] += 1
+
+    monkeypatch.setattr(cli, "build_parser", lambda: _Parser())
+    assert cli.main(["help"]) == 0
+    assert seen["help"] == 1
+
+
 def test_main_routes_passthrough(monkeypatch):
     received = {"args": None}
 

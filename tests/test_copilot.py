@@ -75,8 +75,20 @@ def test_copilot_env_sets_variables(monkeypatch):
 
 def test_exec_copilot(monkeypatch):
     ok = subprocess.CompletedProcess(args=["gh"], returncode=7)
-    monkeypatch.setattr(copilot.subprocess, "run", lambda *a, **k: ok)
+    seen = {"cmd": None}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return ok
+
+    monkeypatch.setattr(copilot.shutil, "which", lambda name: "/usr/bin/copilot" if name == "copilot" else None)
+    monkeypatch.setattr(copilot.subprocess, "run", fake_run)
     assert copilot.exec_copilot(["suggest"], {"A": "1"}) == 7
+    assert seen["cmd"][0] == "copilot"
+
+    monkeypatch.setattr(copilot.shutil, "which", lambda _name: None)
+    assert copilot.exec_copilot(["suggest"], {"A": "1"}) == 7
+    assert seen["cmd"][:2] == ["gh", "copilot"]
 
     def boom(*args, **kwargs):
         raise FileNotFoundError
