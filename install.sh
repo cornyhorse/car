@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Public defaults for this repository; override with env vars if needed.
-CAR_GITHUB_REPO="${CAR_GITHUB_REPO:-matthewkingsbury/car}"
+CAR_GITHUB_REPO="${CAR_GITHUB_REPO:-cornyhorse/car}"
 CAR_GIT_REF="${CAR_GIT_REF:-main}"
 CAR_HOME="${CAR_HOME:-$HOME/.local/share/car}"
 CAR_BIN_DIR="${CAR_BIN_DIR:-$HOME/.local/bin}"

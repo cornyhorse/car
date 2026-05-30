@@ -18,7 +18,7 @@ This repo is configured for container-first usage.
 Quick install via curl and bash:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/matthewkingsbury/car/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cornyhorse/car/main/install.sh | bash
 ```
 
 Installer behavior:
