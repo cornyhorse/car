@@ -150,6 +150,7 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
         label = str(event.node.label)
         if label == "Providers":
             self.query_one("#providers", Tree).root.expand()
+            self.action_focus_models()
             self._set_status("Provider list")
             return
         if label == "all":
@@ -160,7 +161,8 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
             return
 
         if label == "Favorites":
-            self._set_status("Select a favorite model")
+            self.action_focus_models()
+            self._set_status("Favorites list")
             return
 
         if label in self.favorite_models:

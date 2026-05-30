@@ -170,6 +170,7 @@ def test_escape_focuses_providers_and_all_clears_filter():
 
     app.on_tree_node_selected(_FakeEvent("Providers"))
     assert app._status.value == "Provider list"
+    assert app._table.focused is True
 
 
 def test_on_tree_node_selected_favorite_and_provider_paths():
@@ -182,7 +183,8 @@ def test_on_tree_node_selected_favorite_and_provider_paths():
     app._load_models()
 
     app.on_tree_node_selected(_FakeEvent("Favorites"))
-    assert app._status.value == "Select a favorite model"
+    assert app._status.value == "Favorites list"
+    assert app._table.focused is True
 
     app.on_tree_node_selected(_FakeEvent("fav/model"))
     assert app.selected_model == "fav/model"
