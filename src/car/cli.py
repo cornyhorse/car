@@ -358,7 +358,7 @@ def handle_tui(state: CarState) -> int:
     console.print(f"Selected model: {model_id}")
     console.print(f"Provider lock: {provider_lock or '<none>'}")
     console.print(f"Route mode: {route_mode}")
-    return 0
+    return launch_copilot([])
 
 
 def handle_config() -> int:

@@ -82,9 +82,10 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
             if any(m.model_id == model_id for m in self.models)
         ]
         if favorite_models:
-            favorites_branch = root.add("favorites")
+            favorites_branch = root.add("Favorites")
             for model_id in favorite_models:
                 favorites_branch.add_leaf(model_id)
+            favorites_branch.expand()
 
         root.add_leaf("all")
 
@@ -143,6 +144,10 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         label = str(event.node.label)
+        if label == "Providers":
+            self.query_one("#providers", Tree).root.expand()
+            self._set_status("Provider list")
+            return
         if label == "all":
             self.current_provider_filter = None
             self.selected_provider_for_lock = None
@@ -151,7 +156,7 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
             self.query_one("#models", DataTable).focus()
             return
 
-        if label == "favorites":
+        if label == "Favorites":
             self._set_status("Select a favorite model")
             return
 

@@ -146,7 +146,7 @@ def test_provider_tree_places_favorites_above_all():
     app._build_provider_tree()
 
     labels = [node.label for node in app._tree.root.children]
-    assert labels == ["favorites", "all", "a", "b"]
+    assert labels == ["Favorites", "all", "a", "b"]
     assert [node.label for node in app._tree.root.children[0].children] == ["b/model"]
 
 
@@ -168,6 +168,9 @@ def test_escape_focuses_providers_and_all_clears_filter():
     assert app.current_provider_filter is None
     assert app.selected_provider_for_lock is None
 
+    app.on_tree_node_selected(_FakeEvent("Providers"))
+    assert app._status.value == "Provider list"
+
 
 def test_on_tree_node_selected_favorite_and_provider_paths():
     app = _fake_tui([
@@ -178,7 +181,7 @@ def test_on_tree_node_selected_favorite_and_provider_paths():
     app._setup_table()
     app._load_models()
 
-    app.on_tree_node_selected(_FakeEvent("favorites"))
+    app.on_tree_node_selected(_FakeEvent("Favorites"))
     assert app._status.value == "Select a favorite model"
 
     app.on_tree_node_selected(_FakeEvent("fav/model"))

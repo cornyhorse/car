@@ -316,12 +316,18 @@ def test_handle_tui_paths(monkeypatch):
         "save_state",
         lambda state: saved.update({"called": True}),
     )
+    monkeypatch.setattr(cli, "launch_copilot", lambda args: 0)
     assert cli.handle_tui(st) == 0
     assert st.selected_model == "x/y"
     assert st.provider_lock == "openai"
     assert st.route_mode == "provider"
     assert st.favorite_models == ["x/y"]
     assert saved["called"] is True
+
+    seen = {"args": None}
+    monkeypatch.setattr(cli, "launch_copilot", lambda args: seen.update({"args": args}) or 0)
+    assert cli.handle_tui(st) == 0
+    assert seen["args"] == []
 
 
 def test_handle_tui_refresh_paths(monkeypatch):
@@ -336,6 +342,7 @@ def test_handle_tui_refresh_paths(monkeypatch):
         lambda base_url: [ModelEntry("a/b", "a", None, None, None)],
     )
     monkeypatch.setattr(cli, "run_tui", lambda *a: None)
+    monkeypatch.setattr(cli, "launch_copilot", lambda args: 0)
     assert cli.handle_tui(st) == 0
 
     def boom(base_url):

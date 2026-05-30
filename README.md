@@ -152,7 +152,8 @@ Inside TUI:
 
 - Arrow keys navigate providers/models.
 - Esc returns focus to the provider list.
-- Enter selects model and exits.
+- Selecting the root Providers node keeps the list expanded.
+- Enter selects the model, saves it, closes the TUI, and launches Copilot.
 - F toggles favorite for selected model.
 - L toggles provider lock for current provider filter.
 - R toggles route mode:
@@ -162,7 +163,7 @@ Inside TUI:
 - Q exits.
 
 Favorites are shown at the top of the model table for quick switching.
-Favorites also appear in the provider tree above the `all` entry for quick discovery.
+Favorites also appear as a `Favorites` branch under `Providers`, above the `all` entry for quick discovery.
 
 Environment and diagnostics:
 
