@@ -110,6 +110,7 @@ car --update
 ```
 
 `car --update` re-runs the installer in your current mode (docker or venv).
+It forces a rebuild/reinstall so code changes are picked up immediately.
 
 Pass through arguments to gh copilot:
 

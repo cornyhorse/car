@@ -181,7 +181,7 @@ CAR_MATTSTASH_KEY_NAME="${CAR_MATTSTASH_KEY_NAME:-openrouter_api_key}"
 
 if [ "${1:-}" = "--update" ]; then
   shift
-  exec bash "$CAR_HOME/install.sh" --mode docker "$@"
+  exec bash "$CAR_HOME/install.sh" --mode docker --force "$@"
 fi
 
 if [ -z "${CAR_OPENROUTER_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [ -z "${COPILOT_PROVIDER_API_KEY:-}" ]; then
@@ -220,7 +220,7 @@ CAR_MATTSTASH_KEY_NAME="${CAR_MATTSTASH_KEY_NAME:-openrouter_api_key}"
 
 if [ "${1:-}" = "--update" ]; then
   shift
-  exec bash "$CAR_HOME/install.sh" --mode venv "$@"
+  exec bash "$CAR_HOME/install.sh" --mode venv --force "$@"
 fi
 
 export PATH="$CAR_TOOLS_VENV/bin:$PATH"
