@@ -477,6 +477,23 @@ configure_mattstash_profile() {
   log "Required env before startup: KDBX_PASSWORD and MATTSTASH_API_KEY"
 }
 
+warm_model_cache() {
+  local cache_file="$HOME/.cache/car/models.json"
+
+  if [ "$CAR_FORCE" != "1" ] && [ -s "$cache_file" ]; then
+    log "Model cache already exists; skipping refresh"
+    return
+  fi
+
+  log "Refreshing model cache"
+  if "$CAR_WRAPPER" model refresh >/dev/null 2>&1; then
+    log "Model cache refreshed"
+  else
+    warn "Could not refresh model cache during install"
+    warn "Run: car model refresh"
+  fi
+}
+
 main() {
   parse_args "$@"
   require_cmd git
@@ -501,6 +518,7 @@ main() {
   append_path_export_if_missing "$HOME/.zshrc"
 
   configure_keys_wizard
+  warm_model_cache
   configure_mattstash_profile
 
   log "Install complete"

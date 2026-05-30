@@ -36,6 +36,7 @@ Installer behavior:
 - Installs a wrapper command at ~/.local/bin/car for the selected mode
 - Adds ~/.local/bin to both ~/.bashrc and ~/.zshrc when missing
 - Offers an end-of-install key setup wizard using mattstash
+- Refreshes model cache during install when possible (skips when cache already exists unless forced)
 
 Non-interactive examples:
 
