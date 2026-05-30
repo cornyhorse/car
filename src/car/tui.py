@@ -82,7 +82,7 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
             if any(m.model_id == model_id for m in self.models)
         ]
         if favorite_models:
-            favorites_branch = root.add_leaf("Favorites")
+            favorites_branch = root.add("Favorites")
             for model_id in favorite_models:
                 favorites_branch.add_leaf(model_id)
             favorites_branch.expand()
