@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+import json
+import subprocess
+
+from car import state
+
+
+def test_load_state_defaults_when_missing(monkeypatch, tmp_path):
+    f = tmp_path / "state.json"
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    monkeypatch.setattr(state, "ensure_dirs", lambda: None)
+
+    result = state.load_state()
+
+    assert result.openrouter_base_url == "https://openrouter.ai/api/v1"
+    assert result.default_model == "openai/gpt-4o-mini"
+    assert result.provider_lock_mode == "strict"
+
+
+def test_load_state_from_file_and_env_override(monkeypatch, tmp_path):
+    f = tmp_path / "state.json"
+    f.write_text(
+        json.dumps({
+            "default_model": "x/y",
+            "selected_model": "a/b",
+            "provider_lock_mode": "strict",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    monkeypatch.setattr(state, "ensure_dirs", lambda: None)
+    monkeypatch.setenv("CAR_DEFAULT_MODEL", "override/model")
+    monkeypatch.setenv("COPILOT_MODEL", "selected/by/env")
+    monkeypatch.setenv("CAR_PROVIDER_LOCK", "aws-bedrock")
+    monkeypatch.setenv("CAR_PROVIDER_LOCK_MODE", "prefer")
+
+    result = state.load_state()
+
+    assert result.default_model == "override/model"
+    assert result.selected_model == "selected/by/env"
+    assert result.provider_lock == "aws-bedrock"
+    assert result.provider_lock_mode == "prefer"
+
+
+def test_load_state_ignores_invalid_lock_mode(monkeypatch, tmp_path):
+    f = tmp_path / "state.json"
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    monkeypatch.setattr(state, "ensure_dirs", lambda: None)
+    monkeypatch.setenv("CAR_PROVIDER_LOCK_MODE", "invalid")
+
+    result = state.load_state()
+
+    assert result.provider_lock_mode == "strict"
+
+
+def test_load_state_applies_base_url_override(monkeypatch, tmp_path):
+    f = tmp_path / "state.json"
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    monkeypatch.setattr(state, "ensure_dirs", lambda: None)
+    monkeypatch.setenv("CAR_OPENROUTER_BASE_URL", "https://example.test/v1")
+
+    result = state.load_state()
+
+    assert result.openrouter_base_url == "https://example.test/v1"
+
+
+def test_load_state_invalid_json_falls_back(monkeypatch, tmp_path):
+    f = tmp_path / "state.json"
+    f.write_text("{broken", encoding="utf-8")
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    monkeypatch.setattr(state, "ensure_dirs", lambda: None)
+
+    result = state.load_state()
+
+    assert isinstance(result, state.CarState)
+
+
+def test_save_state_writes_json(monkeypatch, tmp_path):
+    f = tmp_path / "state.json"
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    monkeypatch.setattr(state, "ensure_dirs", lambda: None)
+
+    payload = state.CarState(selected_model="abc")
+    state.save_state(payload)
+
+    data = json.loads(f.read_text(encoding="utf-8"))
+    assert data["selected_model"] == "abc"
+
+
+def test_selected_model_prefers_selected_then_default():
+    s1 = state.CarState(default_model="def", selected_model="sel")
+    s2 = state.CarState(default_model="def", selected_model=None)
+
+    assert state.selected_model(s1) == "sel"
+    assert state.selected_model(s2) == "def"
+
+
+def test_resolve_openrouter_key_from_env_precedence(monkeypatch):
+    monkeypatch.setenv("CAR_OPENROUTER_API_KEY", "a")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "b")
+    monkeypatch.setenv("COPILOT_PROVIDER_API_KEY", "c")
+
+    result = state.resolve_openrouter_key(state.CarState())
+
+    assert result == "a"
+
+
+def test_resolve_openrouter_key_from_mattstash(monkeypatch):
+    monkeypatch.delenv("CAR_OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("COPILOT_PROVIDER_API_KEY", raising=False)
+
+    completed = subprocess.CompletedProcess(
+        args=["mattstash"], returncode=0, stdout="token\n", stderr=""
+    )
+    monkeypatch.setattr(state.subprocess, "run", lambda *a, **k: completed)
+
+    result = state.resolve_openrouter_key(state.CarState())
+
+    assert result == "token"
+
+
+def test_resolve_openrouter_key_handles_errors(monkeypatch):
+    monkeypatch.delenv("CAR_OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("COPILOT_PROVIDER_API_KEY", raising=False)
+
+    def boom(*args, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(state.subprocess, "run", boom)
+
+    assert state.resolve_openrouter_key(state.CarState()) is None
+    assert state.resolve_openrouter_key(
+        state.CarState(mattstash_cli="", key_name="name")
+    ) is None
+    assert state.resolve_openrouter_key(
+        state.CarState(mattstash_cli="m", key_name="")
+    ) is None
+
+
+def test_resolve_openrouter_key_rejects_bad_result(monkeypatch):
+    monkeypatch.delenv("CAR_OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("COPILOT_PROVIDER_API_KEY", raising=False)
+
+    completed = subprocess.CompletedProcess(
+        args=["mattstash"], returncode=1, stdout="", stderr="err"
+    )
+    monkeypatch.setattr(state.subprocess, "run", lambda *a, **k: completed)
+
+    assert state.resolve_openrouter_key(state.CarState()) is None
+
+
+def test_state_path_uses_state_file(monkeypatch, tmp_path):
+    f = tmp_path / "x.json"
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    assert state.state_path() == f

@@ -1,0 +1,19 @@
+services:
+  car:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: car-dev:latest
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - ${HOME}/.config/car:/root/.config/car
+      - ${HOME}/.cache/car:/root/.cache/car
+      - ${HOME}/.config/gh:/root/.config/gh:ro
+    environment:
+      - CAR_OPENROUTER_API_KEY
+      - OPENROUTER_API_KEY
+      - COPILOT_PROVIDER_API_KEY
+      - COPILOT_MODEL
+      - CAR_OPENROUTER_BASE_URL
+    entrypoint: ["car"]
