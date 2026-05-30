@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from io import BytesIO
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
@@ -170,3 +171,15 @@ def test_conversion_helpers():
 
     assert openrouter._cost_per_million(None) is None
     assert openrouter._cost_per_million(0.000001) == 1.0
+
+
+def test_cache_is_stale_behaviors():
+    now = datetime.now(UTC)
+    fresh = (now - timedelta(hours=2)).isoformat()
+    stale = (now - timedelta(hours=30)).isoformat()
+
+    assert openrouter.cache_is_stale(fresh, max_age_hours=24) is False
+    assert openrouter.cache_is_stale(stale, max_age_hours=24) is True
+    assert openrouter.cache_is_stale("2020-01-01T00:00:00", max_age_hours=24) is True
+    assert openrouter.cache_is_stale(None, max_age_hours=24) is True
+    assert openrouter.cache_is_stale("not-a-date", max_age_hours=24) is True

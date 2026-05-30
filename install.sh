@@ -190,9 +190,9 @@ if [ -z "${CAR_OPENROUTER_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [
 fi
 
 if docker compose version >/dev/null 2>&1; then
-  exec docker compose -f "$CAR_HOME/docker-compose.yml" run --rm car "$@"
+  exec docker compose -f "$CAR_HOME/docker-compose.yml" run --rm --user "$(id -u):$(id -g)" car "$@"
 elif command -v docker-compose >/dev/null 2>&1; then
-  exec docker-compose -f "$CAR_HOME/docker-compose.yml" run --rm car "$@"
+  exec docker-compose -f "$CAR_HOME/docker-compose.yml" run --rm --user "$(id -u):$(id -g)" car "$@"
 else
   echo "Docker Compose is required but was not found." >&2
   exit 1

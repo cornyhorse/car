@@ -62,6 +62,10 @@ docker compose run --rm car model refresh
 docker compose run --rm car model list
 ```
 
+When invoked via the generated `car` wrapper in docker mode, the container runs
+as your host UID/GID to avoid root-owned files in `~/.config/car` and
+`~/.cache/car`.
+
 Optional mattstash container profile:
 
 ```bash
@@ -156,6 +160,11 @@ The wrapper uses your selected mode:
 
 - State file: ~/.config/car/state.json
 - Model cache: ~/.cache/car/models.json
+
+Model cache refresh behavior:
+
+- `car` refreshes model metadata automatically when cache is missing or older than 24 hours.
+- `car model refresh` always forces a refresh immediately.
 
 State stores:
 

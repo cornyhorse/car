@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -125,6 +125,26 @@ def filter_models(
         return rows
     needle = provider_lock.strip().lower()
     return [row for row in rows if row.provider.lower() == needle]
+
+
+def cache_is_stale(
+    refreshed_at: str | None,
+    max_age_hours: int = 24,
+) -> bool:
+    if not refreshed_at:
+        return True
+
+    try:
+        normalized = refreshed_at.replace("Z", "+00:00")
+        refreshed_dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        return True
+
+    if refreshed_dt.tzinfo is None:
+        refreshed_dt = refreshed_dt.replace(tzinfo=UTC)
+
+    threshold = datetime.now(UTC) - timedelta(hours=max_age_hours)
+    return refreshed_dt < threshold
 
 
 def _to_float(value: Any) -> float | None:

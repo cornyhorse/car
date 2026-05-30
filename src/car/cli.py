@@ -15,6 +15,7 @@ from car.copilot import (
 )
 from car.openrouter import (
     OpenRouterError,
+    cache_is_stale,
     filter_models,
     load_cached_models,
     refresh_models,
@@ -273,6 +274,8 @@ def launch_copilot(copilot_args: list[str]) -> int:
             console.print(f"Run: {state.key_helper}")
         return 1
 
+    ensure_models_fresh(state)
+
     model = selected_model(state)
     env = copilot_env(state.openrouter_base_url, key, model)
 
@@ -283,6 +286,23 @@ def launch_copilot(copilot_args: list[str]) -> int:
         env["CAR_PROVIDER_LOCK_MODE"] = state.provider_lock_mode
 
     return exec_copilot(copilot_args, env)
+
+
+def ensure_models_fresh(state: CarState, max_age_hours: int = 24) -> None:
+    rows, refreshed_at = load_cached_models()
+    if rows and not cache_is_stale(refreshed_at, max_age_hours=max_age_hours):
+        return
+
+    reason = "missing" if not rows else f"older than {max_age_hours}h"
+    console.print(f"Model cache is {reason}. Refreshing...")
+
+    try:
+        refresh_models(state.openrouter_base_url)
+    except OpenRouterError as exc:
+        console.print(
+            f"Model cache refresh skipped: {exc}",
+            style="yellow",
+        )
 
 
 def print_models(

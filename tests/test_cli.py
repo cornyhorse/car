@@ -283,6 +283,7 @@ def test_launch_copilot_paths(monkeypatch):
     assert cli.launch_copilot([]) == 1
 
     monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "token")
+    monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
     monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
     monkeypatch.setattr(cli, "copilot_env", lambda *a: {})
 
@@ -316,6 +317,7 @@ def test_launch_copilot_no_provider_lock(monkeypatch):
     st = CarState(selected_model="m", provider_lock=None)
     monkeypatch.setattr(cli, "load_state", lambda: st)
     monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "token")
+    monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
     monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
     monkeypatch.setattr(cli, "copilot_env", lambda *a: {})
     monkeypatch.setattr(cli, "exec_copilot", lambda args, env: 3)
@@ -346,3 +348,57 @@ def test_print_models_without_optional_headers(monkeypatch):
     text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
     assert "Cache refreshed:" not in text_blob
     assert "Provider lock active:" not in text_blob
+
+
+def test_ensure_models_fresh_refreshes_stale_cache(monkeypatch):
+    st = CarState(openrouter_base_url="u")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "load_cached_models", lambda: ([1], "old"))
+    monkeypatch.setattr(cli, "cache_is_stale", lambda *_a, **_k: True)
+
+    seen = {"called": 0}
+
+    def fake_refresh(url):
+        seen["called"] += 1
+        assert url == "u"
+        return []
+
+    monkeypatch.setattr(cli, "refresh_models", fake_refresh)
+
+    cli.ensure_models_fresh(st)
+    assert seen["called"] == 1
+
+
+def test_ensure_models_fresh_skips_when_fresh(monkeypatch):
+    st = CarState(openrouter_base_url="u")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "load_cached_models", lambda: ([1], "new"))
+    monkeypatch.setattr(cli, "cache_is_stale", lambda *_a, **_k: False)
+
+    seen = {"called": 0}
+    monkeypatch.setattr(
+        cli,
+        "refresh_models",
+        lambda _url: seen.update({"called": seen["called"] + 1}),
+    )
+
+    cli.ensure_models_fresh(st)
+    assert seen["called"] == 0
+
+
+def test_ensure_models_fresh_handles_refresh_error(monkeypatch):
+    st = CarState(openrouter_base_url="u")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "load_cached_models", lambda: ([], None))
+
+    def boom(_url):
+        raise OpenRouterError("network")
+
+    monkeypatch.setattr(cli, "refresh_models", boom)
+
+    cli.ensure_models_fresh(st)
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Model cache refresh skipped:" in text_blob
