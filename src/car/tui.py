@@ -28,6 +28,7 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
 
     BINDINGS = [
         Binding("enter", "pick_model", "Select Model"),
+        Binding("escape", "focus_providers", "Providers"),
         Binding("f", "toggle_favorite", "Toggle Favorite"),
         Binding("l", "toggle_lock", "Toggle Provider Lock"),
         Binding("r", "toggle_route_mode", "Toggle Route Mode"),
@@ -66,14 +67,25 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
         self._build_provider_tree()
         self._setup_table()
         self._load_models()
+        self.call_after_refresh(self.action_focus_providers)
         self._set_status(
-            "Enter=select F=favorite L=provider lock R=route mode A=all providers"
+            "Esc=providers Enter=select F=favorite L=provider lock R=route mode A=all"
         )
 
     def _build_provider_tree(self) -> None:
         tree = self.query_one("#providers", Tree)
         root = tree.root
         root.remove_children()
+
+        favorite_models = [
+            model_id for model_id in self.favorite_models
+            if any(m.model_id == model_id for m in self.models)
+        ]
+        if favorite_models:
+            favorites_branch = root.add("favorites")
+            for model_id in favorite_models:
+                favorites_branch.add_leaf(model_id)
+
         root.add_leaf("all")
 
         providers = sorted({m.provider for m in self.models})
@@ -131,10 +143,37 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         label = str(event.node.label)
-        self.current_provider_filter = None if label == "all" else label
+        if label == "all":
+            self.current_provider_filter = None
+            self.selected_provider_for_lock = None
+            self._load_models()
+            self._set_status("Provider filter: all")
+            self.query_one("#models", DataTable).focus()
+            return
+
+        if label == "favorites":
+            self._set_status("Select a favorite model")
+            return
+
+        if label in self.favorite_models:
+            self.current_provider_filter = None
+            self.selected_model = label
+            self._load_models()
+            self._set_status(f"Favorite selected: {label}")
+            self.query_one("#models", DataTable).focus()
+            return
+
+        self.current_provider_filter = label
         self.selected_provider_for_lock = self.current_provider_filter
         self._load_models()
         self._set_status(f"Provider filter: {label}")
+        self.query_one("#models", DataTable).focus()
+
+    def action_focus_providers(self) -> None:
+        self.query_one("#providers", Tree).focus()
+
+    def action_focus_models(self) -> None:
+        self.query_one("#models", DataTable).focus()
 
     def action_pick_model(self) -> None:
         table = self.query_one("#models", DataTable)

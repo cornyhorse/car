@@ -151,6 +151,7 @@ car tui
 Inside TUI:
 
 - Arrow keys navigate providers/models.
+- Esc returns focus to the provider list.
 - Enter selects model and exits.
 - F toggles favorite for selected model.
 - L toggles provider lock for current provider filter.
@@ -161,6 +162,7 @@ Inside TUI:
 - Q exits.
 
 Favorites are shown at the top of the model table for quick switching.
+Favorites also appear in the provider tree above the `all` entry for quick discovery.
 
 Environment and diagnostics:
 
