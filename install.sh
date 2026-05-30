@@ -179,6 +179,11 @@ CAR_TOOLS_VENV="${CAR_TOOLS_VENV:-$HOME/.local/share/car/venv-tools}"
 CAR_MATTSTASH_CLI="${CAR_MATTSTASH_CLI:-$CAR_TOOLS_VENV/bin/mattstash}"
 CAR_MATTSTASH_KEY_NAME="${CAR_MATTSTASH_KEY_NAME:-openrouter_api_key}"
 
+if [ "${1:-}" = "--update" ]; then
+  shift
+  exec bash "$CAR_HOME/install.sh" --mode docker "$@"
+fi
+
 if [ -z "${CAR_OPENROUTER_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [ -z "${COPILOT_PROVIDER_API_KEY:-}" ]; then
   if [ -x "$CAR_MATTSTASH_CLI" ]; then
     token="$("$CAR_MATTSTASH_CLI" get "$CAR_MATTSTASH_KEY_NAME" --show-password 2>/dev/null || true)"
@@ -207,10 +212,16 @@ write_venv_wrapper() {
 #!/usr/bin/env bash
 set -euo pipefail
 
+CAR_HOME="${CAR_HOME:-$HOME/.local/share/car}"
 CAR_TOOLS_VENV="${CAR_TOOLS_VENV:-$HOME/.local/share/car/venv-tools}"
 CAR_TOOLS_CAR="${CAR_TOOLS_CAR:-$CAR_TOOLS_VENV/bin/car}"
 CAR_MATTSTASH_CLI="${CAR_MATTSTASH_CLI:-$CAR_TOOLS_VENV/bin/mattstash}"
 CAR_MATTSTASH_KEY_NAME="${CAR_MATTSTASH_KEY_NAME:-openrouter_api_key}"
+
+if [ "${1:-}" = "--update" ]; then
+  shift
+  exec bash "$CAR_HOME/install.sh" --mode venv "$@"
+fi
 
 export PATH="$CAR_TOOLS_VENV/bin:$PATH"
 

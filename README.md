@@ -103,6 +103,14 @@ Launch Copilot with configured settings:
 car
 ```
 
+Update car to latest configured repo ref:
+
+```bash
+car --update
+```
+
+`car --update` re-runs the installer in your current mode (docker or venv).
+
 Pass through arguments to gh copilot:
 
 ```bash
