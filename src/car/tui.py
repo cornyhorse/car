@@ -82,7 +82,7 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
             if any(m.model_id == model_id for m in self.models)
         ]
         if favorite_models:
-            favorites_branch = root.add("Favorites")
+            favorites_branch = root.add_leaf("Favorites")
             for model_id in favorite_models:
                 favorites_branch.add_leaf(model_id)
             favorites_branch.expand()
@@ -93,6 +93,10 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
         for provider in providers:
             root.add_leaf(provider)
         root.expand()
+
+    def _reset_provider_filter(self) -> None:
+        self.current_provider_filter = None
+        self.selected_provider_for_lock = None
 
     def _setup_table(self) -> None:
         table = self.query_one("#models", DataTable)
@@ -149,8 +153,7 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
             self._set_status("Provider list")
             return
         if label == "all":
-            self.current_provider_filter = None
-            self.selected_provider_for_lock = None
+            self._reset_provider_filter()
             self._load_models()
             self._set_status("Provider filter: all")
             self.query_one("#models", DataTable).focus()
@@ -223,8 +226,7 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
             self._set_status("Route mode: model-only")
 
     def action_clear_provider_filter(self) -> None:
-        self.current_provider_filter = None
-        self.selected_provider_for_lock = None
+        self._reset_provider_filter()
         self._load_models()
         self._set_status("Provider filter: all")
 
