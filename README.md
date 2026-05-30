@@ -13,7 +13,7 @@ persists model selection, and adds a Textual TUI for model/provider selection.
 
 ## Install
 
-This repo is configured for container-first usage.
+The installer supports both Docker and host-venv workflows.
 
 Quick install via curl and bash:
 
@@ -21,25 +21,52 @@ Quick install via curl and bash:
 curl -fsSL https://raw.githubusercontent.com/cornyhorse/car/main/install.sh | bash
 ```
 
+This launches the interactive installer by default.
+Use `--non-interactive` to disable prompts.
+
 Installer behavior:
 
+- Installs or updates GitHub CLI + gh-copilot using https://gh.io/copilot-install
+- Prompts for install mode (docker or venv) by default
 - Clones or updates this repo at ~/.local/share/car
-- Builds the Docker image for the car service
-- Installs a wrapper command at ~/.local/bin/car
+- Creates a shared tools venv at ~/.local/share/car/venv-tools
+- Installs mattstash into that venv (no system Python install)
+- Installs car into that venv when venv mode is selected
+- Builds the Docker image in docker mode (skips rebuild when git ref and image are unchanged)
+- Installs a wrapper command at ~/.local/bin/car for the selected mode
 - Adds ~/.local/bin to both ~/.bashrc and ~/.zshrc when missing
+- Offers an end-of-install key setup wizard using mattstash
 
-1. Build image:
+Non-interactive examples:
 
 ```bash
-docker compose build
+# Deterministic docker install without prompts
+bash install.sh --mode docker --non-interactive --skip-configure-keys
+
+# Host venv install and key setup wizard
+bash install.sh --mode venv --configure-keys
 ```
 
-2. Run command examples:
+Force refresh:
+
+```bash
+bash install.sh --force
+```
+
+Docker commands:
 
 ```bash
 docker compose run --rm car doctor
 docker compose run --rm car model refresh
 docker compose run --rm car model list
+```
+
+Optional mattstash container profile:
+
+```bash
+export KDBX_PASSWORD="..."
+export MATTSTASH_API_KEY="..."
+docker compose --profile mattstash up -d mattstash
 ```
 
 ## Key Setup
@@ -51,7 +78,13 @@ car resolves OpenRouter key in this order:
 3. COPILOT_PROVIDER_API_KEY
 4. mattstash get <key_name> --show-password (defaults to key name openrouter_api_key)
 
-If you use environment variables:
+Installer key wizard flow:
+
+1. Detects or initializes mattstash setup.
+2. Prompts for key name (default openrouter_api_key).
+3. Stores value via mattstash put <key_name> --value ...
+
+If you prefer environment variables:
 
 ```bash
 export OPENROUTER_API_KEY="..."
@@ -112,29 +145,11 @@ car config
 
 ## Shell Setup
 
-If you want local car command to run in Docker:
+The installer writes ~/.local/bin/car and updates PATH for bash/zsh when needed.
+The wrapper uses your selected mode:
 
-For bash (.bashrc):
-
-```bash
-car() {
-	docker compose -f "$HOME/Documents/GitHub/car/docker-compose.yml" run --rm car "$@"
-}
-```
-
-For zsh (.zshrc):
-
-```bash
-car() {
-	docker compose -f "$HOME/Documents/GitHub/car/docker-compose.yml" run --rm car "$@"
-}
-```
-
-If you prefer host install instead of Docker:
-
-```bash
-pip install -e .
-```
+- docker mode: runs docker compose run --rm car ...
+- venv mode: runs the host venv CLI at ~/.local/share/car/venv-tools/bin/car
 
 ## State And Cache
 

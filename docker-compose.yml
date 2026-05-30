@@ -17,3 +17,15 @@ services:
       - COPILOT_MODEL
       - CAR_OPENROUTER_BASE_URL
     entrypoint: ["car"]
+
+  mattstash:
+    image: ghcr.io/cornyhorse/mattstash:latest
+    profiles: ["mattstash"]
+    environment:
+      - MATTSTASH_DB_PATH=/data/mattstash.kdbx
+      - KDBX_PASSWORD
+      - MATTSTASH_API_KEY
+    volumes:
+      - ${HOME}/.credentials:/data:ro
+    ports:
+      - ${MATTSTASH_PORT:-8000}:8000
