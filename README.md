@@ -15,6 +15,19 @@ persists model selection, and adds a Textual TUI for model/provider selection.
 
 This repo is configured for container-first usage.
 
+Quick install via curl and bash:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/matthewkingsbury/car/main/install.sh | bash
+```
+
+Installer behavior:
+
+- Clones or updates this repo at ~/.local/share/car
+- Builds the Docker image for the car service
+- Installs a wrapper command at ~/.local/bin/car
+- Adds ~/.local/bin to both ~/.bashrc and ~/.zshrc when missing
+
 1. Build image:
 
 ```bash
