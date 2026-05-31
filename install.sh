@@ -412,6 +412,19 @@ state_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encodin
 PY
 }
 
+verify_openrouter_key() {
+  local token="$1"
+  local base_url="${CAR_OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}"
+  local status
+
+  status="$(curl -sS -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $token" \
+    -H "Accept: application/json" \
+    "${base_url%/}/auth/key" || true)"
+
+  [ "$status" = "200" ]
+}
+
 configure_keys_wizard() {
   local do_configure="$CAR_CONFIGURE_KEYS"
   local key_name="$CAR_MATTSTASH_KEY_NAME"
@@ -485,6 +498,11 @@ configure_keys_wizard() {
     persist_key_name "$key_name"
     unset key_value stored_value
     return
+  fi
+
+  if ! verify_openrouter_key "$stored_value"; then
+    warn "Stored key for '$key_name' was rejected by OpenRouter during validation"
+    warn "Double-check the key value or use CAR_OPENROUTER_API_KEY as a temporary workaround."
   fi
 
   persist_key_name "$key_name"
