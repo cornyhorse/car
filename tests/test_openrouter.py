@@ -37,6 +37,7 @@ def test_parse_models_and_sorting():
                 "id": "z/model",
                 "pricing": {"prompt": "0.1", "completion": "0.2"},
                 "context_length": "4096",
+                "top_provider": {"max_completion_tokens": "1024"},
             },
             {
                 "id": "a/model",
@@ -54,6 +55,8 @@ def test_parse_models_and_sorting():
     assert rows[1].prompt_per_million == 100000.0
     assert rows[1].completion_per_million == 200000.0
     assert rows[1].context_length == 4096
+    assert rows[1].max_output_tokens == 1024
+    assert rows[1].max_prompt_tokens == 3072
 
 
 def test_refresh_models_success(monkeypatch, tmp_path):
@@ -130,7 +133,7 @@ def test_load_cached_models_valid_and_sorted(tmp_path):
             {
                 "refreshed_at": "now",
                 "models": [
-                    {"model_id": "z/m", "provider": "z", "prompt_per_million": "1", "completion_per_million": "2", "context_length": "3"},
+                    {"model_id": "z/m", "provider": "z", "prompt_per_million": "1", "completion_per_million": "2", "context_length": "3", "max_prompt_tokens": "2", "max_output_tokens": "1"},
                     {"model_id": "a/m", "provider": "a", "prompt_per_million": None, "completion_per_million": None, "context_length": None},
                     {"model_id": "", "provider": "a"},
                 ],
@@ -145,6 +148,8 @@ def test_load_cached_models_valid_and_sorted(tmp_path):
     assert [r.model_id for r in rows] == ["a/m", "z/m"]
     assert rows[1].prompt_per_million == 1.0
     assert rows[1].context_length == 3
+    assert rows[1].max_prompt_tokens == 2
+    assert rows[1].max_output_tokens == 1
 
 
 def test_filter_models_case_insensitive():
@@ -171,6 +176,13 @@ def test_conversion_helpers():
 
     assert openrouter._cost_per_million(None) is None
     assert openrouter._cost_per_million(0.000001) == 1.0
+
+
+def test_derive_max_prompt_tokens():
+    assert openrouter._derive_max_prompt_tokens(None, 100) is None
+    assert openrouter._derive_max_prompt_tokens(4096, None) == 4096
+    assert openrouter._derive_max_prompt_tokens(4096, 1024) == 3072
+    assert openrouter._derive_max_prompt_tokens(100, 1000) == 1
 
 
 def test_cache_is_stale_behaviors():

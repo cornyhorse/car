@@ -56,7 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
             car management examples:
             - `car doctor`                     # verify gh/auth/key/cache
             - `car model list`                 # show cached models/pricing
+            - `car model list --provider=openai,google`
             - `car model refresh`              # force refresh pricing cache
+            - `car provider list`              # show available providers
             - `car --update`                   # re-run installer update flow
 
             Common workflows:
@@ -79,14 +81,26 @@ def build_parser() -> argparse.ArgumentParser:
     model = sub.add_parser("model", help="Model management")
     model_sub = model.add_subparsers(dest="action")
 
-    model_sub.add_parser("list", help="List cached models")
-    model_sub.add_parser("ls", help="Alias for list")
+    model_list = model_sub.add_parser("list", help="List cached models")
+    model_list.add_argument(
+        "--provider",
+        default="",
+        help="Comma-separated provider filter, e.g. openai,google",
+    )
+    model_ls = model_sub.add_parser("ls", help="Alias for list")
+    model_ls.add_argument(
+        "--provider",
+        default="",
+        help="Comma-separated provider filter, e.g. openai,google",
+    )
     model_sub.add_parser("refresh", help="Refresh model cache from OpenRouter")
     model_sub.add_parser("current", help="Show current model")
     model_sub.add_parser("favorites", help="List favorite models")
 
     use = model_sub.add_parser("use", help="Set selected model")
     use.add_argument("model_id")
+    model_set = model_sub.add_parser("set", help="Alias for use")
+    model_set.add_argument("model_id")
     fav_add = model_sub.add_parser("favorite-add", help="Add model to favorites")
     fav_add.add_argument("model_id")
     fav_rm = model_sub.add_parser("favorite-remove", help="Remove model from favorites")
@@ -105,6 +119,8 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("value", choices=["strict", "prefer"])
     route = provider_sub.add_parser("route", help="Set routing mode")
     route.add_argument("value", choices=["model", "provider"])
+    provider_sub.add_parser("list", help="List available providers")
+    provider_sub.add_parser("ls", help="Alias for list")
     provider_sub.add_parser("unlock", help="Clear provider lock")
     provider_sub.add_parser("current", help="Show current provider lock")
 
@@ -169,6 +185,13 @@ def handle_model(state: CarState, args: argparse.Namespace) -> int:
                 console.print(f"Refresh failed: {exc}")
                 return 1
 
+        provider_arg = getattr(args, "provider", "")
+        if provider_arg:
+            rows = filter_models_by_provider_arg(rows, provider_arg)
+            print_models(rows, refreshed_at, None)
+            console.print(f"Provider filter: {provider_arg}")
+            return 0
+
         rows = filter_models(rows, state.provider_lock)
         print_models(rows, refreshed_at, state.provider_lock)
         return 0
@@ -185,7 +208,7 @@ def handle_model(state: CarState, args: argparse.Namespace) -> int:
         )
         return 0
 
-    if action == "use":
+    if action in {"use", "set"}:
         state.selected_model = args.model_id
         save_state(state)
         console.print(f"Selected model: {args.model_id}")
@@ -231,6 +254,21 @@ def handle_model(state: CarState, args: argparse.Namespace) -> int:
 
 def handle_provider(state: CarState, args: argparse.Namespace) -> int:
     action = args.action or "current"
+
+    if action in {"list", "ls"}:
+        rows, _ = load_cached_models()
+        if not rows:
+            console.print("Model cache missing. Refreshing now...")
+            try:
+                rows = refresh_models(state.openrouter_base_url)
+            except OpenRouterError as exc:
+                console.print(f"Refresh failed: {exc}")
+                return 1
+
+        providers = sorted({row.provider for row in rows})
+        for provider in providers:
+            console.print(provider)
+        return 0
 
     if action == "lock":
         state.provider_lock = args.provider
@@ -383,6 +421,12 @@ def launch_copilot(
     model = selected_model(state)
     env = copilot_env(state.openrouter_base_url, key, model)
 
+    max_prompt_tokens, max_output_tokens = resolve_model_token_limits(model)
+    if max_prompt_tokens is not None:
+        env["COPILOT_PROVIDER_MAX_PROMPT_TOKENS"] = str(max_prompt_tokens)
+    if max_output_tokens is not None:
+        env["COPILOT_PROVIDER_MAX_OUTPUT_TOKENS"] = str(max_output_tokens)
+
     # Provider lock is a local policy for model filtering and state.
     # We surface it here for future integrations that can pass routing hints.
     if state.provider_lock:
@@ -442,3 +486,22 @@ def format_price(value: float | None) -> str:
     if value is None:
         return "-"
     return f"{value:.4f}"
+
+
+def filter_models_by_provider_arg(rows, provider_arg: str):
+    providers = {
+        value.strip().lower()
+        for value in provider_arg.split(",")
+        if value.strip()
+    }
+    if not providers:
+        return rows
+    return [row for row in rows if row.provider.lower() in providers]
+
+
+def resolve_model_token_limits(model_id: str) -> tuple[int | None, int | None]:
+    rows, _ = load_cached_models()
+    for row in rows:
+        if row.model_id == model_id:
+            return row.max_prompt_tokens, row.max_output_tokens
+    return None, None

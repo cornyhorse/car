@@ -199,12 +199,15 @@ def test_toggle_favorite_and_route_mode(monkeypatch):
     app = _fake_tui([
         tui.ModelEntry("a/model", "a", None, None, None),
     ])
+    built = {"count": 0}
+    app._build_provider_tree = lambda: built.update({"count": built["count"] + 1})
     app._build_provider_tree()
     app._setup_table()
     app._load_models()
 
     app.action_toggle_favorite()
     assert app.favorite_models == ["a/model"]
+    assert built["count"] >= 2
     app.action_toggle_favorite()
     assert app.favorite_models == []
 
@@ -239,3 +242,18 @@ def test_pick_model_respects_route_modes():
     app2.post_message = lambda message: None
     app2.action_pick_model()
     assert captured2["payload"][1] is None
+
+
+def test_row_selected_event_picks_model():
+    app = _fake_tui([
+        tui.ModelEntry("a/model", "a", None, None, None),
+    ])
+    app._build_provider_tree()
+    app._setup_table()
+    app._load_models()
+    captured = {"called": 0}
+    app.action_pick_model = lambda: captured.update({"called": captured["called"] + 1})
+
+    event = SimpleNamespace(data_table=SimpleNamespace(id="models"))
+    app.on_data_table_row_selected(event)
+    assert captured["called"] == 1

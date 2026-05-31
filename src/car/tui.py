@@ -27,7 +27,7 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
     """
 
     BINDINGS = [
-        Binding("enter", "pick_model", "Select Model"),
+        Binding("enter", "pick_model", "Select Model", priority=True),
         Binding("escape", "focus_providers", "Providers"),
         Binding("f", "toggle_favorite", "Toggle Favorite"),
         Binding("l", "toggle_lock", "Toggle Provider Lock"),
@@ -205,6 +205,10 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
         self.post_message(ModelPicked(model_id, provider))
         self.exit((model_id, provider_lock, self.route_mode, self.favorite_models))
 
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.data_table.id == "models":
+            self.action_pick_model()
+
     def action_toggle_lock(self) -> None:
         provider = self.selected_provider_for_lock
         if not provider:
@@ -249,7 +253,9 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
             self.favorite_models.append(model_id)
             self._set_status(f"Added favorite: {model_id}")
 
+        self._build_provider_tree()
         self._load_models()
+        self.action_focus_models()
 
     def _set_status(self, value: str) -> None:
         self.query_one("#status", Static).update(Text(value))

@@ -18,6 +18,8 @@ class ModelEntry:
     prompt_per_million: float | None
     completion_per_million: float | None
     context_length: int | None
+    max_prompt_tokens: int | None = None
+    max_output_tokens: int | None = None
 
 
 class OpenRouterError(RuntimeError):
@@ -38,9 +40,12 @@ def parse_models(payload: dict[str, Any]) -> list[ModelEntry]:
             continue
 
         pricing = item.get("pricing") or {}
+        top_provider = item.get("top_provider") or {}
         prompt = _to_float(pricing.get("prompt"))
         completion = _to_float(pricing.get("completion"))
         context = _to_int(item.get("context_length"))
+        max_output = _to_int(top_provider.get("max_completion_tokens"))
+        max_prompt = _derive_max_prompt_tokens(context, max_output)
 
         rows.append(
             ModelEntry(
@@ -49,6 +54,8 @@ def parse_models(payload: dict[str, Any]) -> list[ModelEntry]:
                 prompt_per_million=_cost_per_million(prompt),
                 completion_per_million=_cost_per_million(completion),
                 context_length=context,
+                max_prompt_tokens=max_prompt,
+                max_output_tokens=max_output,
             )
         )
     rows.sort(key=lambda x: (x.provider, x.model_id))
@@ -109,6 +116,8 @@ def load_cached_models(
                 item.get("completion_per_million")
             ),
             context_length=_to_int(item.get("context_length")),
+            max_prompt_tokens=_to_int(item.get("max_prompt_tokens")),
+            max_output_tokens=_to_int(item.get("max_output_tokens")),
         )
         for item in payload.get("models", [])
         if item.get("model_id")
@@ -169,3 +178,14 @@ def _cost_per_million(unit_cost: float | None) -> float | None:
     if unit_cost is None:
         return None
     return unit_cost * 1_000_000
+
+
+def _derive_max_prompt_tokens(
+    context_length: int | None,
+    max_output_tokens: int | None,
+) -> int | None:
+    if context_length is None:
+        return None
+    if max_output_tokens is None:
+        return context_length
+    return max(context_length - max_output_tokens, 1)

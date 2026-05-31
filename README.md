@@ -124,7 +124,10 @@ Model commands:
 ```bash
 car model refresh
 car model list
+car model ls
+car model list --provider=openai,google
 car model use openai/gpt-4o-mini
+car model set openai/gpt-4o-mini
 car model current
 car model favorites
 car model favorite-add anthropic/claude-3-haiku
@@ -135,6 +138,8 @@ car model favorite-use anthropic/claude-3-haiku
 Provider lock commands:
 
 ```bash
+car provider list
+car provider ls
 car provider lock aws-bedrock
 car provider mode strict
 car provider route model

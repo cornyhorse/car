@@ -34,6 +34,22 @@ def test_build_parser_parses_model_use():
     assert ns.model_id == "x/y"
 
 
+def test_build_parser_parses_model_set_alias():
+    parser = cli.build_parser()
+    ns = parser.parse_args(["model", "set", "x/y"])
+    assert ns.command == "model"
+    assert ns.action == "set"
+    assert ns.model_id == "x/y"
+
+
+def test_build_parser_parses_model_list_provider_filter():
+    parser = cli.build_parser()
+    ns = parser.parse_args(["model", "list", "--provider", "openai,google"])
+    assert ns.command == "model"
+    assert ns.action == "list"
+    assert ns.provider == "openai,google"
+
+
 def test_main_routes_no_args(monkeypatch):
     monkeypatch.setattr(cli, "launch_copilot", lambda args: 7)
     assert cli.main([]) == 7
@@ -137,6 +153,30 @@ def test_handle_model_list_from_cache(monkeypatch):
     assert seen["printed"] is True
 
 
+def test_handle_model_list_with_provider_arg(monkeypatch):
+    st = CarState(provider_lock="openai")
+    rows = [
+        ModelEntry("openai/gpt", "openai", 1.0, 2.0, 3),
+        ModelEntry("google/gemini", "google", 1.0, 2.0, 3),
+        ModelEntry("anthropic/claude", "anthropic", 1.0, 2.0, 3),
+    ]
+
+    monkeypatch.setattr(cli, "load_cached_models", lambda: (rows, "now"))
+    monkeypatch.setattr(cli, "filter_models", lambda r, p: r)
+
+    seen = {"rows": None, "provider_lock": None}
+
+    def fake_print_models(rows_arg, refreshed_at, provider_lock):
+        seen["rows"] = rows_arg
+        seen["provider_lock"] = provider_lock
+
+    monkeypatch.setattr(cli, "print_models", fake_print_models)
+
+    assert cli.handle_model(st, _args(action="list", provider="openai,google")) == 0
+    assert [row.provider for row in seen["rows"]] == ["openai", "google"]
+    assert seen["provider_lock"] is None
+
+
 def test_handle_model_list_refresh_on_empty(monkeypatch):
     st = CarState(openrouter_base_url="u")
     rows = [ModelEntry("a/b", "a", None, None, None)]
@@ -200,6 +240,9 @@ def test_handle_model_use_current_unknown(monkeypatch):
     assert saved["called"] is True
     assert st.selected_model == "a/b"
 
+    assert cli.handle_model(st, _args(action="set", model_id="c/d")) == 0
+    assert st.selected_model == "c/d"
+
     assert cli.handle_model(st, _args(action="current")) == 0
     assert cli.handle_model(st, _args(action="nope")) == 1
 
@@ -255,6 +298,45 @@ def test_handle_provider_branches(monkeypatch):
 
     assert cli.handle_provider(st, _args(action="current")) == 0
     assert cli.handle_provider(st, _args(action="unknown")) == 1
+
+
+def test_handle_provider_list_from_cache(monkeypatch):
+    st = CarState(openrouter_base_url="u")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli,
+        "load_cached_models",
+        lambda: ([
+            ModelEntry("openai/gpt", "openai", None, None, None),
+            ModelEntry("google/gemini", "google", None, None, None),
+        ], "now"),
+    )
+
+    assert cli.handle_provider(st, _args(action="list")) == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "openai" in text_blob
+    assert "google" in text_blob
+
+
+def test_handle_provider_list_refresh_paths(monkeypatch):
+    st = CarState(openrouter_base_url="u")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "load_cached_models", lambda: ([], None))
+    monkeypatch.setattr(
+        cli,
+        "refresh_models",
+        lambda _url: [ModelEntry("a/b", "a", None, None, None)],
+    )
+
+    assert cli.handle_provider(st, _args(action="ls")) == 0
+
+    def boom(_url):
+        raise OpenRouterError("bad")
+
+    monkeypatch.setattr(cli, "refresh_models", boom)
+    assert cli.handle_provider(st, _args(action="list")) == 1
 
 
 def test_handle_env(monkeypatch):
@@ -374,6 +456,7 @@ def test_launch_copilot_paths(monkeypatch):
     monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
     monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
     monkeypatch.setattr(cli, "copilot_env", lambda *a: {})
+    monkeypatch.setattr(cli, "resolve_model_token_limits", lambda _model: (1234, 456))
 
     seen = {"args": None, "env": None}
 
@@ -389,6 +472,8 @@ def test_launch_copilot_paths(monkeypatch):
     assert seen["env"]["CAR_PROVIDER_LOCK"] == "aws"
     assert seen["env"]["CAR_PROVIDER_LOCK_MODE"] == "prefer"
     assert seen["env"]["CAR_ROUTE_MODE"] == "provider"
+    assert seen["env"]["COPILOT_PROVIDER_MAX_PROMPT_TOKENS"] == "1234"
+    assert seen["env"]["COPILOT_PROVIDER_MAX_OUTPUT_TOKENS"] == "456"
 
 
 def test_launch_copilot_missing_key_prints_helper(monkeypatch):
@@ -410,6 +495,7 @@ def test_launch_copilot_no_provider_lock(monkeypatch):
     monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
     monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
     monkeypatch.setattr(cli, "copilot_env", lambda *a: {})
+    monkeypatch.setattr(cli, "resolve_model_token_limits", lambda _model: (None, None))
     monkeypatch.setattr(cli, "exec_copilot", lambda args, env, backend=None: 3)
 
     assert cli.launch_copilot([]) == 3
@@ -422,6 +508,7 @@ def test_launch_copilot_passes_backend(monkeypatch):
     monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
     monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
     monkeypatch.setattr(cli, "copilot_env", lambda *a: {})
+    monkeypatch.setattr(cli, "resolve_model_token_limits", lambda _model: (None, None))
 
     seen = {"backend": None}
 
@@ -511,3 +598,32 @@ def test_ensure_models_fresh_handles_refresh_error(monkeypatch):
     cli.ensure_models_fresh(st)
     text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
     assert "Model cache refresh skipped:" in text_blob
+
+
+def test_filter_models_by_provider_arg_helper():
+    rows = [
+        ModelEntry("openai/gpt", "openai", None, None, None),
+        ModelEntry("google/gemini", "google", None, None, None),
+    ]
+
+    assert cli.filter_models_by_provider_arg(rows, "") == rows
+    filtered = cli.filter_models_by_provider_arg(rows, "OPENAI, google")
+    assert [row.provider for row in filtered] == ["openai", "google"]
+
+
+def test_resolve_model_token_limits(monkeypatch):
+    rows = [
+        ModelEntry(
+            "openai/gpt-4o-mini",
+            "openai",
+            None,
+            None,
+            128000,
+            120000,
+            8000,
+        )
+    ]
+    monkeypatch.setattr(cli, "load_cached_models", lambda: (rows, "now"))
+
+    assert cli.resolve_model_token_limits("openai/gpt-4o-mini") == (120000, 8000)
+    assert cli.resolve_model_token_limits("missing/model") == (None, None)
