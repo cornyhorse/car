@@ -465,8 +465,30 @@ configure_keys_wizard() {
   fi
 
   "$CAR_MATTSTASH_CLI" put "$key_name" --value "$key_value" >/dev/null
+
+  local stored_value
+  stored_value="$($CAR_MATTSTASH_CLI get "$key_name" --show-password 2>/dev/null || true)"
+  stored_value="$(printf '%s' "$stored_value" | tr -d '\r\n')"
+  if [ -z "$stored_value" ]; then
+    warn "Stored key could not be read back from mattstash"
+    warn "Your mattstash setup may be returning masked values."
+    warn "Use CAR_OPENROUTER_API_KEY as a temporary workaround."
+    persist_key_name "$key_name"
+    unset key_value stored_value
+    return
+  fi
+
+  if [ "$stored_value" != "$key_value" ]; then
+    warn "mattstash read-back mismatch for key '$key_name'"
+    warn "Stored value differs from entered key; verification will fail."
+    warn "Use CAR_OPENROUTER_API_KEY as a temporary workaround."
+    persist_key_name "$key_name"
+    unset key_value stored_value
+    return
+  fi
+
   persist_key_name "$key_name"
-  unset key_value
+  unset key_value stored_value
   log "Stored key in mattstash as '$key_name'"
 }
 
