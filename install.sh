@@ -451,6 +451,15 @@ configure_keys_wizard() {
   local do_configure="$CAR_CONFIGURE_KEYS"
   local key_name="$CAR_MATTSTASH_KEY_NAME"
   local key_value=""
+  local env_key_source=""
+
+  if [ -n "${CAR_OPENROUTER_API_KEY:-}" ]; then
+    env_key_source="CAR_OPENROUTER_API_KEY"
+  elif [ -n "${OPENROUTER_API_KEY:-}" ]; then
+    env_key_source="OPENROUTER_API_KEY"
+  elif [ -n "${COPILOT_PROVIDER_API_KEY:-}" ]; then
+    env_key_source="COPILOT_PROVIDER_API_KEY"
+  fi
 
   if [ "$do_configure" = "ask" ]; then
     if prompt_yes_no "Configure OpenRouter key in mattstash now?" "y"; then
@@ -507,7 +516,11 @@ configure_keys_wizard() {
   if [ -z "$stored_value" ]; then
     warn "Stored key could not be read back from mattstash"
     warn "Your mattstash setup may be returning masked values."
-    warn "Use CAR_OPENROUTER_API_KEY as a temporary workaround."
+    if [ -n "$env_key_source" ]; then
+      warn "Runtime may still work via $env_key_source override."
+    else
+      warn "Use CAR_OPENROUTER_API_KEY as a temporary workaround."
+    fi
     persist_key_name "$key_name"
     unset key_value stored_value
     return
@@ -515,8 +528,13 @@ configure_keys_wizard() {
 
   if [ "$stored_value" != "$key_value" ]; then
     warn "mattstash read-back mismatch for key '$key_name'"
-    warn "Stored value differs from entered key; verification will fail."
-    warn "Use CAR_OPENROUTER_API_KEY as a temporary workaround."
+    warn "Stored mattstash value differs from entered key."
+    if [ -n "$env_key_source" ]; then
+      warn "Runtime may still verify via $env_key_source override."
+    else
+      warn "Mattstash-backed verification will likely fail."
+      warn "Use CAR_OPENROUTER_API_KEY as a temporary workaround."
+    fi
     persist_key_name "$key_name"
     unset key_value stored_value
     return
