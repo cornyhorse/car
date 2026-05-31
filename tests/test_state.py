@@ -85,6 +85,19 @@ def test_load_state_applies_base_url_override(monkeypatch, tmp_path):
     assert result.openrouter_base_url == "https://example.test/v1"
 
 
+def test_load_state_applies_mattstash_overrides(monkeypatch, tmp_path):
+    f = tmp_path / "state.json"
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    monkeypatch.setattr(state, "ensure_dirs", lambda: None)
+    monkeypatch.setenv("CAR_MATTSTASH_CLI", "/usr/local/bin/mattstash")
+    monkeypatch.setenv("CAR_MATTSTASH_KEY_NAME", "openrouter.apikey")
+
+    result = state.load_state()
+
+    assert result.mattstash_cli == "/usr/local/bin/mattstash"
+    assert result.key_name == "openrouter.apikey"
+
+
 def test_load_state_invalid_json_falls_back(monkeypatch, tmp_path):
     f = tmp_path / "state.json"
     f.write_text("{broken", encoding="utf-8")
@@ -148,6 +161,32 @@ def test_resolve_openrouter_key_from_mattstash(monkeypatch):
     token, source = state.resolve_openrouter_key_with_source(state.CarState())
     assert token == "token"
     assert source == "mattstash:openrouter_api_key"
+
+
+def test_resolve_openrouter_key_with_source_uses_env_key_name_override(monkeypatch):
+    monkeypatch.delenv("CAR_OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("COPILOT_PROVIDER_API_KEY", raising=False)
+    monkeypatch.setenv("CAR_MATTSTASH_KEY_NAME", "openrouter.apikey")
+
+    seen = {"cmd": None}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout="token\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(state.subprocess, "run", fake_run)
+
+    loaded = state.load_state()
+    token, source = state.resolve_openrouter_key_with_source(loaded)
+    assert token == "token"
+    assert source == "mattstash:openrouter.apikey"
+    assert seen["cmd"][2] == "openrouter.apikey"
 
 
 def test_resolve_openrouter_key_handles_errors(monkeypatch):

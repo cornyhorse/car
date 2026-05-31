@@ -151,6 +151,8 @@ def _apply_env_overrides(state: CarState) -> CarState:
     provider_lock = os.environ.get("CAR_PROVIDER_LOCK", "").strip()
     mode = os.environ.get("CAR_PROVIDER_LOCK_MODE", "").strip()
     route_mode = os.environ.get("CAR_ROUTE_MODE", "").strip()
+    mattstash_cli = os.environ.get("CAR_MATTSTASH_CLI", "").strip()
+    key_name = os.environ.get("CAR_MATTSTASH_KEY_NAME", "").strip()
 
     if base_url:
         state.openrouter_base_url = base_url
@@ -164,6 +166,10 @@ def _apply_env_overrides(state: CarState) -> CarState:
         state.provider_lock_mode = mode
     if route_mode in {"model", "provider"}:
         state.route_mode = route_mode
+    if mattstash_cli:
+        state.mattstash_cli = mattstash_cli
+    if key_name:
+        state.key_name = key_name
 
     return state
 
