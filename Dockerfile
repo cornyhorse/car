@@ -16,7 +16,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 
 COPY pyproject.toml README.md /workspace/
 COPY src /workspace/src
+COPY tests /workspace/tests
 WORKDIR /workspace
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir -e .[dev]
 
 ENTRYPOINT ["car"]

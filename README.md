@@ -60,6 +60,10 @@ Docker commands:
 docker compose run --rm car doctor
 docker compose run --rm car model refresh
 docker compose run --rm car model list
+# Run full test suite in container
+docker compose run --rm --entrypoint python car -m pytest -q
+# Run only integration-marked tests
+docker compose run --rm --entrypoint python car -m pytest -q -m integration
 ```
 
 When invoked via the generated `car` wrapper in docker mode, the container runs

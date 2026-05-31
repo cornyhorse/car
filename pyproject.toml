@@ -32,6 +32,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --cov=car --cov-report=term-missing --cov-fail-under=100"
+markers = [
+  "integration: tests that exercise subprocess-based integration paths",
+]
 
 [tool.coverage.run]
 branch = true
