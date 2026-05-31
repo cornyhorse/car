@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import getpass
 import sys
 from textwrap import dedent
 
@@ -28,8 +29,10 @@ from car.state import (
     CarState,
     load_state,
     resolve_openrouter_key,
+    resolve_openrouter_key_with_source,
     save_state,
     selected_model,
+    store_openrouter_key,
     state_path,
 )
 from car.tui import run_tui
@@ -129,6 +132,17 @@ def build_parser() -> argparse.ArgumentParser:
     key = sub.add_parser("key", help="API key commands")
     key_sub = key.add_subparsers(dest="action")
     key_sub.add_parser("verify", help="Verify resolved OpenRouter API key")
+    key_set = key_sub.add_parser("set", help="Store OpenRouter API key")
+    key_set.add_argument(
+        "--value",
+        default="",
+        help="Key value (omit to enter securely via prompt)",
+    )
+    key_set.add_argument(
+        "--key-name",
+        default="",
+        help="Override mattstash key name for this set operation",
+    )
 
     sub.add_parser("env", help="Show resolved provider environment")
     sub.add_parser("doctor", help="Check installation and auth")
@@ -344,11 +358,44 @@ def handle_env(state: CarState) -> int:
 def handle_key(state: CarState, args: argparse.Namespace) -> int:
     action = args.action or "verify"
 
+    if action == "set":
+        key_name_override = getattr(args, "key_name", "").strip()
+        value = getattr(args, "value", "").strip()
+
+        if not value:
+            try:
+                value = getpass.getpass("OpenRouter API key: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("Key entry cancelled", style="yellow")
+                return 1
+
+        if not value:
+            console.print("OpenRouter API key is empty", style="red")
+            return 1
+
+        try:
+            key_name = store_openrouter_key(
+                state,
+                value,
+                key_name=key_name_override or None,
+            )
+        except RuntimeError as exc:
+            console.print(f"Key set failed: {exc}", style="red")
+            return 1
+
+        if key_name_override and key_name_override != state.key_name:
+            state.key_name = key_name_override
+            save_state(state)
+
+        console.print(f"Stored OpenRouter key in mattstash as: {key_name}")
+        console.print("Run 'car key verify' to validate it against OpenRouter")
+        return 0
+
     if action != "verify":
         console.print("Unknown key action")
         return 1
 
-    key = resolve_openrouter_key(state)
+    key, source = resolve_openrouter_key_with_source(state)
     if not key:
         console.print("OpenRouter key not found.", style="red")
         if state.key_helper:
@@ -359,6 +406,18 @@ def handle_key(state: CarState, args: argparse.Namespace) -> int:
         payload = verify_api_key(state.openrouter_base_url, key)
     except OpenRouterError as exc:
         console.print(f"Key verification failed: {exc}", style="red")
+        if source:
+            console.print(f"Resolved key source: {source}")
+        if "rejected" in str(exc).lower() and source in {
+            "CAR_OPENROUTER_API_KEY",
+            "OPENROUTER_API_KEY",
+            "COPILOT_PROVIDER_API_KEY",
+        }:
+            console.print(
+                "Hint: an environment variable is overriding mattstash. "
+                "Unset it or update that env var value.",
+                style="yellow",
+            )
         return 1
 
     details = payload.get("data") if isinstance(payload, dict) else None
@@ -366,6 +425,8 @@ def handle_key(state: CarState, args: argparse.Namespace) -> int:
     usage = details.get("usage") if isinstance(details, dict) else None
 
     console.print("OpenRouter API key is valid", style="green")
+    if source:
+        console.print(f"Resolved key source: {source}")
     if label:
         console.print(f"Key label: {label}")
     if usage is not None:

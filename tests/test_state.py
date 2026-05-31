@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+import pytest
+
 from car import state
 
 
@@ -124,6 +126,10 @@ def test_resolve_openrouter_key_from_env_precedence(monkeypatch):
 
     assert result == "a"
 
+    token, source = state.resolve_openrouter_key_with_source(state.CarState())
+    assert token == "a"
+    assert source == "CAR_OPENROUTER_API_KEY"
+
 
 def test_resolve_openrouter_key_from_mattstash(monkeypatch):
     monkeypatch.delenv("CAR_OPENROUTER_API_KEY", raising=False)
@@ -139,6 +145,10 @@ def test_resolve_openrouter_key_from_mattstash(monkeypatch):
 
     assert result == "token"
 
+    token, source = state.resolve_openrouter_key_with_source(state.CarState())
+    assert token == "token"
+    assert source == "mattstash:openrouter_api_key"
+
 
 def test_resolve_openrouter_key_handles_errors(monkeypatch):
     monkeypatch.delenv("CAR_OPENROUTER_API_KEY", raising=False)
@@ -151,12 +161,19 @@ def test_resolve_openrouter_key_handles_errors(monkeypatch):
     monkeypatch.setattr(state.subprocess, "run", boom)
 
     assert state.resolve_openrouter_key(state.CarState()) is None
+    assert state.resolve_openrouter_key_with_source(state.CarState()) == (None, None)
     assert state.resolve_openrouter_key(
         state.CarState(mattstash_cli="", key_name="name")
     ) is None
+    assert state.resolve_openrouter_key_with_source(
+        state.CarState(mattstash_cli="", key_name="name")
+    ) == (None, None)
     assert state.resolve_openrouter_key(
         state.CarState(mattstash_cli="m", key_name="")
     ) is None
+    assert state.resolve_openrouter_key_with_source(
+        state.CarState(mattstash_cli="m", key_name="")
+    ) == (None, None)
 
 
 def test_resolve_openrouter_key_rejects_bad_result(monkeypatch):
@@ -176,6 +193,49 @@ def test_state_path_uses_state_file(monkeypatch, tmp_path):
     f = tmp_path / "x.json"
     monkeypatch.setattr(state, "state_file", lambda: f)
     assert state.state_path() == f
+
+
+def test_store_openrouter_key_success(monkeypatch):
+    completed = subprocess.CompletedProcess(
+        args=["mattstash"], returncode=0, stdout="ok\n", stderr=""
+    )
+    monkeypatch.setattr(state.subprocess, "run", lambda *a, **k: completed)
+
+    s = state.CarState(mattstash_cli="mattstash", key_name="openrouter_api_key")
+    assert state.store_openrouter_key(s, "tok") == "openrouter_api_key"
+    assert state.store_openrouter_key(s, "tok", key_name="other") == "other"
+
+
+def test_store_openrouter_key_validation_errors():
+    s = state.CarState(mattstash_cli="", key_name="name")
+    with pytest.raises(RuntimeError, match="not configured"):
+        state.store_openrouter_key(s, "tok")
+
+    s2 = state.CarState(mattstash_cli="m", key_name="")
+    with pytest.raises(RuntimeError, match="not configured"):
+        state.store_openrouter_key(s2, "tok")
+
+    s3 = state.CarState(mattstash_cli="m", key_name="name")
+    with pytest.raises(RuntimeError, match="empty"):
+        state.store_openrouter_key(s3, " ")
+
+
+def test_store_openrouter_key_runtime_errors(monkeypatch):
+    s = state.CarState(mattstash_cli="m", key_name="name")
+
+    def missing(*_args, **_kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(state.subprocess, "run", missing)
+    with pytest.raises(RuntimeError, match="not found"):
+        state.store_openrouter_key(s, "tok")
+
+    completed = subprocess.CompletedProcess(
+        args=["m"], returncode=1, stdout="", stderr="denied"
+    )
+    monkeypatch.setattr(state.subprocess, "run", lambda *a, **k: completed)
+    with pytest.raises(RuntimeError, match="mattstash put failed"):
+        state.store_openrouter_key(s, "tok")
 
 
 def test_state_from_dict_sanitizes_favorites_and_route_mode():

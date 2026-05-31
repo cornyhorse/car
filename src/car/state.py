@@ -73,6 +73,13 @@ def selected_model(state: CarState) -> str:
 
 
 def resolve_openrouter_key(state: CarState) -> str | None:
+    token, _source = resolve_openrouter_key_with_source(state)
+    return token
+
+
+def resolve_openrouter_key_with_source(
+    state: CarState,
+) -> tuple[str | None, str | None]:
     for key in (
         "CAR_OPENROUTER_API_KEY",
         "OPENROUTER_API_KEY",
@@ -80,12 +87,12 @@ def resolve_openrouter_key(state: CarState) -> str | None:
     ):
         value = os.environ.get(key, "").strip()
         if value:
-            return value
+            return value, key
 
     mattstash = state.mattstash_cli.strip()
     key_name = state.key_name.strip()
     if not mattstash or not key_name:
-        return None
+        return None, None
 
     try:
         result = subprocess.run(
@@ -95,13 +102,46 @@ def resolve_openrouter_key(state: CarState) -> str | None:
             text=True,
         )
     except FileNotFoundError:
-        return None
+        return None, None
 
     token = result.stdout.strip()
     if result.returncode != 0 or not token:
-        return None
+        return None, None
 
-    return token
+    return token, f"mattstash:{key_name}"
+
+
+def store_openrouter_key(
+    state: CarState,
+    value: str,
+    key_name: str | None = None,
+) -> str:
+    mattstash = state.mattstash_cli.strip()
+    resolved_key_name = (key_name if key_name is not None else state.key_name).strip()
+    token = value.strip()
+
+    if not mattstash:
+        raise RuntimeError("mattstash CLI is not configured")
+    if not resolved_key_name:
+        raise RuntimeError("key name is not configured")
+    if not token:
+        raise RuntimeError("OpenRouter API key is empty")
+
+    try:
+        result = subprocess.run(
+            [mattstash, "put", resolved_key_name, "--value", token],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("mattstash executable not found") from exc
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or "unable to store key"
+        raise RuntimeError(f"mattstash put failed: {detail}")
+
+    return resolved_key_name
 
 
 def _apply_env_overrides(state: CarState) -> CarState:

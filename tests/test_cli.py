@@ -57,6 +57,15 @@ def test_build_parser_parses_key_verify():
     assert ns.action == "verify"
 
 
+def test_build_parser_parses_key_set():
+    parser = cli.build_parser()
+    ns = parser.parse_args(["key", "set", "--value", "tok", "--key-name", "name"])
+    assert ns.command == "key"
+    assert ns.action == "set"
+    assert ns.value == "tok"
+    assert ns.key_name == "name"
+
+
 def test_main_routes_no_args(monkeypatch):
     monkeypatch.setattr(cli, "launch_copilot", lambda args: 7)
     assert cli.main([]) == 7
@@ -417,10 +426,10 @@ def test_handle_key_paths(monkeypatch):
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
 
-    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda _state: None)
+    monkeypatch.setattr(cli, "resolve_openrouter_key_with_source", lambda _state: (None, None))
     assert cli.handle_key(st, _args(action="verify")) == 1
 
-    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda _state: "tok")
+    monkeypatch.setattr(cli, "resolve_openrouter_key_with_source", lambda _state: ("tok", "mattstash:openrouter_api_key"))
     monkeypatch.setattr(cli, "verify_api_key", lambda _url, _key: {"data": {"label": "main", "usage": 12}})
     assert cli.handle_key(st, _args(action="verify")) == 0
 
@@ -438,15 +447,121 @@ def test_handle_key_no_helper_and_optional_fields(monkeypatch):
     monkeypatch.setattr(cli, "console", c)
 
     # Covers missing-key path without helper message.
-    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda _state: None)
+    monkeypatch.setattr(cli, "resolve_openrouter_key_with_source", lambda _state: (None, None))
     assert cli.handle_key(st, _args(action="verify")) == 1
     text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
     assert "Run:" not in text_blob
 
     # Covers success path where label/usage are absent.
-    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda _state: "tok")
+    monkeypatch.setattr(cli, "resolve_openrouter_key_with_source", lambda _state: ("tok", "OPENROUTER_API_KEY"))
     monkeypatch.setattr(cli, "verify_api_key", lambda _url, _key: {"data": {}})
     assert cli.handle_key(st, _args(action="verify")) == 0
+
+
+def test_handle_key_rejected_env_source_hint(monkeypatch):
+    st = CarState(openrouter_base_url="u", key_helper="")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli,
+        "resolve_openrouter_key_with_source",
+        lambda _state: ("tok", "OPENROUTER_API_KEY"),
+    )
+
+    def boom(_url, _key):
+        raise OpenRouterError("OpenRouter API key rejected (HTTP 401)")
+
+    monkeypatch.setattr(cli, "verify_api_key", boom)
+    assert cli.handle_key(st, _args(action="verify")) == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Resolved key source: OPENROUTER_API_KEY" in text_blob
+    assert "environment variable is overriding mattstash" in text_blob
+
+
+def test_handle_key_without_source_branches(monkeypatch):
+    st = CarState(openrouter_base_url="u", key_helper="")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    # Failure path with no source should not print source line.
+    monkeypatch.setattr(
+        cli,
+        "resolve_openrouter_key_with_source",
+        lambda _state: ("tok", None),
+    )
+
+    def boom(_url, _key):
+        raise OpenRouterError("network down")
+
+    monkeypatch.setattr(cli, "verify_api_key", boom)
+    assert cli.handle_key(st, _args(action="verify")) == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Resolved key source:" not in text_blob
+
+    # Success path with no source should also skip source line.
+    c.messages.clear()
+    monkeypatch.setattr(cli, "verify_api_key", lambda _url, _key: {"data": {"label": "main"}})
+    assert cli.handle_key(st, _args(action="verify")) == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Resolved key source:" not in text_blob
+
+
+def test_handle_key_set_paths(monkeypatch):
+    st = CarState(openrouter_base_url="u", key_name="openrouter_api_key")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    seen = {"saved": 0, "value": None, "key_name": None}
+
+    def fake_store(_state, value, key_name=None):
+        seen["value"] = value
+        seen["key_name"] = key_name
+        return key_name or "openrouter_api_key"
+
+    monkeypatch.setattr(cli, "store_openrouter_key", fake_store)
+    monkeypatch.setattr(
+        cli,
+        "save_state",
+        lambda _state: seen.update({"saved": seen["saved"] + 1}),
+    )
+    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt: "prompt-token")
+
+    assert cli.handle_key(st, _args(action="set", value="", key_name="")) == 0
+    assert seen["value"] == "prompt-token"
+
+    assert cli.handle_key(st, _args(action="set", value="arg-token", key_name="my_key")) == 0
+    assert seen["value"] == "arg-token"
+    assert seen["key_name"] == "my_key"
+    assert st.key_name == "my_key"
+    assert seen["saved"] == 1
+
+
+def test_handle_key_set_failures(monkeypatch):
+    st = CarState()
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt: "")
+    assert cli.handle_key(st, _args(action="set", value="", key_name="")) == 1
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("bad")
+
+    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt: "tok")
+    monkeypatch.setattr(cli, "store_openrouter_key", boom)
+    assert cli.handle_key(st, _args(action="set", value="", key_name="")) == 1
+
+
+def test_handle_key_set_cancelled(monkeypatch):
+    st = CarState()
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    def cancelled(_prompt):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli.getpass, "getpass", cancelled)
+    assert cli.handle_key(st, _args(action="set", value="", key_name="")) == 1
 
 
 def test_handle_doctor_success_and_failure(monkeypatch):
