@@ -98,18 +98,8 @@ def resolve_openrouter_key_with_source(
     if not mattstash or not key_name:
         return None, None
 
-    try:
-        result = subprocess.run(
-            [mattstash, "get", key_name, "--show-password"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
-        return None, None
-
-    token = result.stdout.strip()
-    if result.returncode != 0 or not token:
+    token = _mattstash_get_value(mattstash, key_name)
+    if not token:
         return None, None
 
     return token, f"mattstash:{key_name}"
@@ -145,14 +135,8 @@ def store_openrouter_key(
         detail = result.stderr.strip() or "unable to store key"
         raise RuntimeError(f"mattstash put failed: {detail}")
 
-    verify = subprocess.run(
-        [mattstash, "get", resolved_key_name, "--show-password"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    read_back = verify.stdout.strip()
-    if verify.returncode != 0 or not read_back:
+    read_back = _mattstash_get_value(mattstash, resolved_key_name)
+    if not read_back:
         raise RuntimeError("stored key could not be read back from mattstash")
 
     if read_back != token:
@@ -195,3 +179,60 @@ def _apply_env_overrides(state: CarState) -> CarState:
 
 def state_path() -> Path:
     return state_file()
+
+
+def _mattstash_get_value(mattstash: str, key_name: str) -> str | None:
+    for cmd in (
+        [mattstash, "get", key_name, "--show-password", "--json"],
+        [mattstash, "get", key_name, "--show-password"],
+    ):
+        try:
+            result = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            return None
+
+        if result.returncode != 0:
+            continue
+
+        token = _extract_mattstash_value(result.stdout)
+        if token:
+            return token
+
+    return None
+
+
+def _extract_mattstash_value(raw: str) -> str | None:
+    text = raw.strip()
+    if not text:
+        return None
+
+    has_json = False
+    try:
+        parsed = json.loads(raw)
+        has_json = True
+    except json.JSONDecodeError:
+        parsed = None
+
+    if has_json:
+        if isinstance(parsed, dict):
+            value = parsed.get("value")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("value:"):
+            value = stripped.split(":", 1)[1].strip()
+            if value:
+                return value
+
+    if "\n" not in text:
+        return text
+
+    return None

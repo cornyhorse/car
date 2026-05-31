@@ -186,8 +186,11 @@ fi
 
 if [ -z "${CAR_OPENROUTER_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [ -z "${COPILOT_PROVIDER_API_KEY:-}" ]; then
   if [ -x "$CAR_MATTSTASH_CLI" ]; then
-    token="$("$CAR_MATTSTASH_CLI" get "$CAR_MATTSTASH_KEY_NAME" --show-password 2>/dev/null || true)"
-    token="$(printf '%s' "$token" | tr -d '\r')"
+    token="$($CAR_MATTSTASH_CLI get "$CAR_MATTSTASH_KEY_NAME" --show-password --json 2>/dev/null | sed -nE 's/^[[:space:]]*"value":[[:space:]]*"(.*)"[[:space:]]*,?$/\1/p' | head -n 1)"
+    if [ -z "$token" ]; then
+      token="$($CAR_MATTSTASH_CLI get "$CAR_MATTSTASH_KEY_NAME" --show-password 2>/dev/null | sed -n 's/^  value: //p' | head -n 1)"
+    fi
+    token="$(printf '%s' "$token" | tr -d '\r\n')"
     if [ -n "$token" ]; then
       export COPILOT_PROVIDER_API_KEY="$token"
       export CAR_OPENROUTER_KEY_SOURCE="mattstash:$CAR_MATTSTASH_KEY_NAME"
@@ -228,8 +231,11 @@ export PATH="$CAR_TOOLS_VENV/bin:$PATH"
 
 if [ -z "${CAR_OPENROUTER_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [ -z "${COPILOT_PROVIDER_API_KEY:-}" ]; then
   if [ -x "$CAR_MATTSTASH_CLI" ]; then
-    token="$("$CAR_MATTSTASH_CLI" get "$CAR_MATTSTASH_KEY_NAME" --show-password 2>/dev/null || true)"
-    token="$(printf '%s' "$token" | tr -d '\r')"
+    token="$($CAR_MATTSTASH_CLI get "$CAR_MATTSTASH_KEY_NAME" --show-password --json 2>/dev/null | sed -nE 's/^[[:space:]]*"value":[[:space:]]*"(.*)"[[:space:]]*,?$/\1/p' | head -n 1)"
+    if [ -z "$token" ]; then
+      token="$($CAR_MATTSTASH_CLI get "$CAR_MATTSTASH_KEY_NAME" --show-password 2>/dev/null | sed -n 's/^  value: //p' | head -n 1)"
+    fi
+    token="$(printf '%s' "$token" | tr -d '\r\n')"
     if [ -n "$token" ]; then
       export COPILOT_PROVIDER_API_KEY="$token"
       export CAR_OPENROUTER_KEY_SOURCE="mattstash:$CAR_MATTSTASH_KEY_NAME"
@@ -425,6 +431,22 @@ verify_openrouter_key() {
   [ "$status" = "200" ]
 }
 
+mattstash_get_value() {
+  local key_name="$1"
+  local value
+
+  value="$($CAR_MATTSTASH_CLI get "$key_name" --show-password --json 2>/dev/null | sed -nE 's/^[[:space:]]*"value":[[:space:]]*"(.*)"[[:space:]]*,?$/\1/p' | head -n 1)"
+  if [ -n "$value" ]; then
+    printf '%s' "$value"
+    return
+  fi
+
+  value="$($CAR_MATTSTASH_CLI get "$key_name" --show-password 2>/dev/null | sed -n 's/^  value: //p' | head -n 1)"
+  if [ -n "$value" ]; then
+    printf '%s' "$value"
+  fi
+}
+
 configure_keys_wizard() {
   local do_configure="$CAR_CONFIGURE_KEYS"
   local key_name="$CAR_MATTSTASH_KEY_NAME"
@@ -480,7 +502,7 @@ configure_keys_wizard() {
   "$CAR_MATTSTASH_CLI" put "$key_name" --value "$key_value" >/dev/null
 
   local stored_value
-  stored_value="$($CAR_MATTSTASH_CLI get "$key_name" --show-password 2>/dev/null || true)"
+  stored_value="$(mattstash_get_value "$key_name")"
   stored_value="$(printf '%s' "$stored_value" | tr -d '\r\n')"
   if [ -z "$stored_value" ]; then
     warn "Stored key could not be read back from mattstash"

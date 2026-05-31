@@ -90,6 +90,7 @@ if args[0] == "put":
 if args[0] == "get":
     if len(args) < 3 or args[2] != "--show-password":
         sys.exit(2)
+    as_json = "--json" in args
     key = args[1]
     if not store.exists():
         sys.exit(1)
@@ -97,9 +98,14 @@ if args[0] == "get":
     if stored_key != key:
         sys.exit(1)
     if mode == "masked":
-        print("*****")
+        value = "*****"
     else:
-        print(stored_value)
+        value = stored_value
+    if as_json:
+        print('{"name": "%s", "version": "0000000001", "value": "%s", "notes": null}' % (key, value))
+    else:
+        print(key)
+        print("  value: %s" % value)
     sys.exit(0)
 
 sys.exit(1)

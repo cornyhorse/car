@@ -360,3 +360,58 @@ def test_state_from_dict_sanitizes_favorites_and_route_mode():
 
     assert result.favorite_models == []
     assert result.route_mode == "model"
+
+
+def test_extract_mattstash_value_json_and_structured_output():
+    assert (
+        state._extract_mattstash_value(
+            '{"name": "k", "version": "1", "value": "tok-123", "notes": null}'
+        )
+        == "tok-123"
+    )
+    assert (
+        state._extract_mattstash_value(
+            "openrouter_api_key\n  value: tok-456\n"
+        )
+        == "tok-456"
+    )
+
+
+def test_extract_mattstash_value_rejects_multiline_unknown_shape():
+    assert state._extract_mattstash_value("line1\nline2\n") is None
+
+
+def test_extract_mattstash_value_dict_without_string_value():
+    assert state._extract_mattstash_value('{"value": 123}') is None
+
+
+def test_extract_mattstash_value_handles_empty_and_nondict_json():
+    assert state._extract_mattstash_value("  \n\t") is None
+    assert state._extract_mattstash_value("[]") is None
+
+
+def test_extract_mattstash_value_ignores_empty_value_line():
+    assert state._extract_mattstash_value("openrouter_api_key\n  value:   \n") is None
+
+
+def test_mattstash_get_value_falls_back_to_second_format(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_run(cmd, **_kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="{}\n",
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout="openrouter_api_key\n  value: tok-789\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(state.subprocess, "run", fake_run)
+    assert state._mattstash_get_value("mattstash", "openrouter_api_key") == "tok-789"
