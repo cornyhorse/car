@@ -144,6 +144,17 @@ def test_resolve_openrouter_key_from_env_precedence(monkeypatch):
     assert source == "CAR_OPENROUTER_API_KEY"
 
 
+def test_resolve_openrouter_key_with_wrapper_source_hint(monkeypatch):
+    monkeypatch.delenv("CAR_OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("COPILOT_PROVIDER_API_KEY", "from-wrapper")
+    monkeypatch.setenv("CAR_OPENROUTER_KEY_SOURCE", "mattstash:openrouter_api_key")
+
+    token, source = state.resolve_openrouter_key_with_source(state.CarState())
+    assert token == "from-wrapper"
+    assert source == "mattstash:openrouter_api_key"
+
+
 def test_resolve_openrouter_key_from_mattstash(monkeypatch):
     monkeypatch.delenv("CAR_OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
@@ -235,10 +246,24 @@ def test_state_path_uses_state_file(monkeypatch, tmp_path):
 
 
 def test_store_openrouter_key_success(monkeypatch):
-    completed = subprocess.CompletedProcess(
-        args=["mattstash"], returncode=0, stdout="ok\n", stderr=""
-    )
-    monkeypatch.setattr(state.subprocess, "run", lambda *a, **k: completed)
+    def fake_run(cmd, **_kwargs):
+        if cmd[1] == "put":
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="",
+                stderr="",
+            )
+        if cmd[1] == "get":
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="tok\n",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(state.subprocess, "run", fake_run)
 
     s = state.CarState(mattstash_cli="mattstash", key_name="openrouter_api_key")
     assert state.store_openrouter_key(s, "tok") == "openrouter_api_key"
@@ -274,6 +299,56 @@ def test_store_openrouter_key_runtime_errors(monkeypatch):
     )
     monkeypatch.setattr(state.subprocess, "run", lambda *a, **k: completed)
     with pytest.raises(RuntimeError, match="mattstash put failed"):
+        state.store_openrouter_key(s, "tok")
+
+
+def test_store_openrouter_key_detects_readback_mismatch(monkeypatch):
+    s = state.CarState(mattstash_cli="m", key_name="name")
+
+    def fake_run(cmd, **_kwargs):
+        if cmd[1] == "put":
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="",
+                stderr="",
+            )
+        if cmd[1] == "get":
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="different\n",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(state.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="does not match input"):
+        state.store_openrouter_key(s, "tok")
+
+
+def test_store_openrouter_key_detects_readback_failure(monkeypatch):
+    s = state.CarState(mattstash_cli="m", key_name="name")
+
+    def fake_run(cmd, **_kwargs):
+        if cmd[1] == "put":
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="",
+                stderr="",
+            )
+        if cmd[1] == "get":
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout="",
+                stderr="missing",
+            )
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(state.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="could not be read back"):
         state.store_openrouter_key(s, "tok")
 
 

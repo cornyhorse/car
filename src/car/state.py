@@ -80,6 +80,8 @@ def resolve_openrouter_key(state: CarState) -> str | None:
 def resolve_openrouter_key_with_source(
     state: CarState,
 ) -> tuple[str | None, str | None]:
+    source_hint = os.environ.get("CAR_OPENROUTER_KEY_SOURCE", "").strip()
+
     for key in (
         "CAR_OPENROUTER_API_KEY",
         "OPENROUTER_API_KEY",
@@ -87,6 +89,8 @@ def resolve_openrouter_key_with_source(
     ):
         value = os.environ.get(key, "").strip()
         if value:
+            if key == "COPILOT_PROVIDER_API_KEY" and source_hint.startswith("mattstash:"):
+                return value, source_hint
             return value, key
 
     mattstash = state.mattstash_cli.strip()
@@ -140,6 +144,21 @@ def store_openrouter_key(
     if result.returncode != 0:
         detail = result.stderr.strip() or "unable to store key"
         raise RuntimeError(f"mattstash put failed: {detail}")
+
+    verify = subprocess.run(
+        [mattstash, "get", resolved_key_name, "--show-password"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    read_back = verify.stdout.strip()
+    if verify.returncode != 0 or not read_back:
+        raise RuntimeError("stored key could not be read back from mattstash")
+
+    if read_back != token:
+        raise RuntimeError(
+            "mattstash stored value does not match input; check mattstash configuration/version"
+        )
 
     return resolved_key_name
 

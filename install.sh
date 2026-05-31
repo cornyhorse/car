@@ -190,6 +190,7 @@ if [ -z "${CAR_OPENROUTER_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [
     token="$(printf '%s' "$token" | tr -d '\r')"
     if [ -n "$token" ]; then
       export COPILOT_PROVIDER_API_KEY="$token"
+      export CAR_OPENROUTER_KEY_SOURCE="mattstash:$CAR_MATTSTASH_KEY_NAME"
     fi
   fi
 fi
@@ -231,6 +232,7 @@ if [ -z "${CAR_OPENROUTER_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [
     token="$(printf '%s' "$token" | tr -d '\r')"
     if [ -n "$token" ]; then
       export COPILOT_PROVIDER_API_KEY="$token"
+      export CAR_OPENROUTER_KEY_SOURCE="mattstash:$CAR_MATTSTASH_KEY_NAME"
     fi
   fi
 fi
