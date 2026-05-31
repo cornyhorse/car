@@ -117,6 +117,32 @@ def test_main_routes_passthrough(monkeypatch):
     assert received["args"] == ["suggest", "hello"]
 
 
+def test_main_routes_model_without_action_to_model_help(monkeypatch):
+    seen = {"parsed": None, "dispatch": 0, "launch": 0}
+
+    class _Parser:
+        def parse_args(self, args):
+            seen["parsed"] = args
+            raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "build_parser", lambda: _Parser())
+    monkeypatch.setattr(
+        cli,
+        "dispatch_subcommand",
+        lambda _args: seen.update({"dispatch": seen["dispatch"] + 1}) or 1,
+    )
+    monkeypatch.setattr(
+        cli,
+        "launch_copilot",
+        lambda _args: seen.update({"launch": seen["launch"] + 1}) or 1,
+    )
+
+    assert cli.main(["model"]) == 0
+    assert seen["parsed"] == ["model", "--help"]
+    assert seen["dispatch"] == 0
+    assert seen["launch"] == 0
+
+
 def test_dispatch_subcommand_all_branches(monkeypatch):
     st = CarState()
     monkeypatch.setattr(cli, "load_state", lambda: st)
@@ -228,6 +254,7 @@ def test_handle_model_use_current_unknown(monkeypatch):
     st = CarState(default_model="d")
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "load_cached_models", lambda: ([], None))
 
     saved = {"called": False}
 
@@ -373,11 +400,13 @@ def test_handle_doctor_success_and_failure(monkeypatch):
     monkeypatch.setattr(cli, "check_gh_auth", lambda: _Check("auth", True, "ok"))
     monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "k")
     monkeypatch.setattr(cli, "load_cached_models", lambda: ([1], "now"))
+    monkeypatch.setattr(cli, "resolve_model_token_limits", lambda _model: (123, 45))
     assert cli.handle_doctor(st) == 0
 
     monkeypatch.setattr(cli, "check_gh_installed", lambda: _Check("gh", False, "bad"))
     monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: None)
     monkeypatch.setattr(cli, "load_cached_models", lambda: ([], None))
+    monkeypatch.setattr(cli, "resolve_model_token_limits", lambda _model: (None, None))
     assert cli.handle_doctor(st) == 1
 
 
@@ -611,6 +640,95 @@ def test_filter_models_by_provider_arg_helper():
     assert [row.provider for row in filtered] == ["openai", "google"]
 
 
+def test_normalize_model_selection_short_id_warns_and_resolves(monkeypatch):
+    rows = [
+        ModelEntry("deepseek/deepseek-v4-pro", "deepseek", None, None, 128000),
+    ]
+    monkeypatch.setattr(cli, "load_cached_models", lambda: (rows, "now"))
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    resolved = cli.normalize_model_selection("deepseek-v4-pro")
+    assert resolved == "deepseek/deepseek-v4-pro"
+
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "imprecise" in text_blob
+    assert "deepseek/deepseek-v4-pro" in text_blob
+
+
+def test_normalize_model_selection_typo_suggests(monkeypatch):
+    rows = [
+        ModelEntry("deepseek/deepseek-v4-pro", "deepseek", None, None, 128000),
+    ]
+    monkeypatch.setattr(cli, "load_cached_models", lambda: (rows, "now"))
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    resolved = cli.normalize_model_selection("deepseek/depseek-v4-pro")
+    assert resolved == "deepseek/depseek-v4-pro"
+
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Did you mean:" in text_blob
+    assert "deepseek/deepseek-v4-pro" in text_blob
+
+
+def test_normalize_model_selection_exact_and_empty_cases(monkeypatch):
+    rows = [
+        ModelEntry("openai/gpt-4o-mini", "openai", None, None, 128000),
+    ]
+    monkeypatch.setattr(cli, "load_cached_models", lambda: (rows, "now"))
+
+    assert cli.normalize_model_selection("OPENAI/GPT-4O-MINI") == "openai/gpt-4o-mini"
+    assert cli.normalize_model_selection("") == ""
+
+
+def test_normalize_model_selection_without_suggestions(monkeypatch):
+    rows = [
+        ModelEntry("openai/gpt-4o-mini", "openai", None, None, 128000),
+    ]
+    monkeypatch.setattr(cli, "load_cached_models", lambda: (rows, "now"))
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    resolved = cli.normalize_model_selection("totally-unknown-model")
+    assert resolved == "totally-unknown-model"
+    assert c.messages == []
+
+
+def test_suggest_model_corrections_helper():
+    rows = [
+        ModelEntry("deepseek/deepseek-v4-pro", "deepseek", None, None, None),
+        ModelEntry("openai/gpt-4o-mini", "openai", None, None, None),
+    ]
+    suggestions = cli.suggest_model_corrections("depseek-v4-pro", rows)
+    assert suggestions[0] == "deepseek/deepseek-v4-pro"
+    assert cli.suggest_model_corrections("", rows) == []
+
+
+def test_suggest_model_corrections_additional_branches():
+    rows = [
+        ModelEntry("deepseek/deepseek-v4-pro", "deepseek", None, None, None),
+        ModelEntry("deepseek/deepseek-v4-pro", "deepseek", None, None, None),
+        ModelEntry("deepseek/deepseek-v3", "deepseek", None, None, None),
+        ModelEntry("openai/gpt-4o-mini", "openai", None, None, None),
+    ]
+
+    # Hits substring boost path and limit break path.
+    limited = cli.suggest_model_corrections("deepseek", rows, limit=1)
+    assert len(limited) == 1
+    assert limited[0].startswith("deepseek/")
+
+    # Hits duplicate-skip path when model is already present in ordered.
+    deduped = cli.suggest_model_corrections("deepseek", rows, limit=5)
+    assert deduped.count("deepseek/deepseek-v4-pro") == 1
+
+    # Hits non-empty needle with no scored matches.
+    assert cli.suggest_model_corrections("zzzzzzzz", rows) == []
+
+
 def test_resolve_model_token_limits(monkeypatch):
     rows = [
         ModelEntry(
@@ -626,4 +744,15 @@ def test_resolve_model_token_limits(monkeypatch):
     monkeypatch.setattr(cli, "load_cached_models", lambda: (rows, "now"))
 
     assert cli.resolve_model_token_limits("openai/gpt-4o-mini") == (120000, 8000)
+    assert cli.resolve_model_token_limits("gpt-4o-mini") == (120000, 8000)
     assert cli.resolve_model_token_limits("missing/model") == (None, None)
+
+
+def test_resolve_model_token_limits_ambiguous_short_id(monkeypatch):
+    rows = [
+        ModelEntry("openai/same", "openai", None, None, 10, 8, 2),
+        ModelEntry("anthropic/same", "anthropic", None, None, 12, 10, 2),
+    ]
+    monkeypatch.setattr(cli, "load_cached_models", lambda: (rows, "now"))
+
+    assert cli.resolve_model_token_limits("same") == (None, None)

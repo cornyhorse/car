@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import sys
 from textwrap import dedent
 
@@ -146,6 +147,12 @@ def main(argv: list[str] | None = None) -> int:
     if not argv:
         return launch_copilot([])
 
+    if argv == ["model"]:
+        try:
+            parser.parse_args(["model", "--help"])
+        except SystemExit:
+            return 0
+
     if argv[0] in {"model", "provider", "env", "doctor", "tui", "config"}:
         args = parser.parse_args(argv)
         return dispatch_subcommand(args)
@@ -209,9 +216,9 @@ def handle_model(state: CarState, args: argparse.Namespace) -> int:
         return 0
 
     if action in {"use", "set"}:
-        state.selected_model = args.model_id
+        state.selected_model = normalize_model_selection(args.model_id)
         save_state(state)
-        console.print(f"Selected model: {args.model_id}")
+        console.print(f"Selected model: {state.selected_model}")
         return 0
 
     if action == "current":
@@ -350,6 +357,25 @@ def handle_doctor(state: CarState) -> int:
                 f"{len(rows)} cached models"
                 if rows
                 else "Cache empty; run car model refresh"
+            ),
+        })()
+    )
+
+    model = selected_model(state)
+    prompt_tokens, output_tokens = resolve_model_token_limits(model)
+    checks.append(
+        type("_Doctor", (), {
+            "name": "model-token-limits",
+            "ok": prompt_tokens is not None and output_tokens is not None,
+            "detail": (
+                (
+                    f"prompt={prompt_tokens}, output={output_tokens} for {model}"
+                )
+                if prompt_tokens is not None and output_tokens is not None
+                else (
+                    f"No cached token limits for {model}; "
+                    "Copilot may use provider defaults"
+                )
             ),
         })()
     )
@@ -501,7 +527,91 @@ def filter_models_by_provider_arg(rows, provider_arg: str):
 
 def resolve_model_token_limits(model_id: str) -> tuple[int | None, int | None]:
     rows, _ = load_cached_models()
+
+    needle = model_id.strip().lower()
+
     for row in rows:
-        if row.model_id == model_id:
+        if row.model_id.lower() == needle:
             return row.max_prompt_tokens, row.max_output_tokens
+
+    # Support short-form selections (e.g., "deepseek-v4-pro") by matching
+    # unique provider-qualified IDs that share the same model suffix.
+    suffix_matches = [
+        row
+        for row in rows
+        if row.model_id.lower().split("/", 1)[-1] == needle
+    ]
+    if len(suffix_matches) == 1:
+        row = suffix_matches[0]
+        return row.max_prompt_tokens, row.max_output_tokens
+
     return None, None
+
+
+def normalize_model_selection(model_id: str) -> str:
+    rows, _ = load_cached_models()
+    if not rows:
+        return model_id
+
+    needle = model_id.strip()
+    if not needle:
+        return model_id
+
+    needle_lower = needle.lower()
+
+    for row in rows:
+        if row.model_id.lower() == needle_lower:
+            return row.model_id
+
+    suffix_matches = [
+        row.model_id
+        for row in rows
+        if row.model_id.lower().split("/", 1)[-1] == needle_lower
+    ]
+    if len(suffix_matches) == 1:
+        resolved = suffix_matches[0]
+        console.print(
+            f"[yellow]Warning:[/yellow] '{model_id}' is imprecise. "
+            f"Using '{resolved}'."
+        )
+        return resolved
+
+    suggestions = suggest_model_corrections(model_id, rows)
+    if suggestions:
+        console.print(
+            f"[yellow]Warning:[/yellow] '{model_id}' was not found exactly. "
+            f"Did you mean: {', '.join(suggestions)}"
+        )
+
+    return model_id
+
+
+def suggest_model_corrections(model_id: str, rows, limit: int = 3) -> list[str]:
+    needle = model_id.strip().lower()
+    if not needle:
+        return []
+
+    scored: list[tuple[float, str]] = []
+    for row in rows:
+        full = row.model_id.lower()
+        suffix = full.split("/", 1)[-1]
+        score = max(
+            difflib.SequenceMatcher(a=needle, b=full).ratio(),
+            difflib.SequenceMatcher(a=needle, b=suffix).ratio(),
+        )
+        if needle in full or needle in suffix:
+            score = max(score, 0.85)
+        if score >= 0.6:
+            scored.append((score, row.model_id))
+
+    if not scored:
+        return []
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    ordered: list[str] = []
+    for _, model in scored:
+        if model not in ordered:
+            ordered.append(model)
+        if len(ordered) >= limit:
+            break
+    return ordered
