@@ -174,6 +174,7 @@ Favorites also appear as a `Favorites` branch under `Providers`, above the `all`
 Environment and diagnostics:
 
 ```bash
+car key verify
 car env
 car doctor
 car config

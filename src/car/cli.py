@@ -21,6 +21,7 @@ from car.openrouter import (
     filter_models,
     load_cached_models,
     refresh_models,
+    verify_api_key,
 )
 from car.paths import models_cache_file
 from car.state import (
@@ -125,6 +126,10 @@ def build_parser() -> argparse.ArgumentParser:
     provider_sub.add_parser("unlock", help="Clear provider lock")
     provider_sub.add_parser("current", help="Show current provider lock")
 
+    key = sub.add_parser("key", help="API key commands")
+    key_sub = key.add_subparsers(dest="action")
+    key_sub.add_parser("verify", help="Verify resolved OpenRouter API key")
+
     sub.add_parser("env", help="Show resolved provider environment")
     sub.add_parser("doctor", help="Check installation and auth")
     sub.add_parser("tui", help="Open Textual model selector")
@@ -153,7 +158,13 @@ def main(argv: list[str] | None = None) -> int:
         except SystemExit:
             return 0
 
-    if argv[0] in {"model", "provider", "env", "doctor", "tui", "config"}:
+    if argv == ["key"]:
+        try:
+            parser.parse_args(["key", "--help"])
+        except SystemExit:
+            return 0
+
+    if argv[0] in {"model", "provider", "key", "env", "doctor", "tui", "config"}:
         args = parser.parse_args(argv)
         return dispatch_subcommand(args)
 
@@ -167,6 +178,8 @@ def dispatch_subcommand(args: argparse.Namespace) -> int:
         return handle_model(state, args)
     if args.command == "provider":
         return handle_provider(state, args)
+    if args.command == "key":
+        return handle_key(state, args)
     if args.command == "env":
         return handle_env(state)
     if args.command == "doctor":
@@ -325,6 +338,38 @@ def handle_env(state: CarState) -> int:
         console.print("COPILOT_PROVIDER_API_KEY=<unset>")
         if state.key_helper:
             console.print(f"Hint: run {state.key_helper}")
+    return 0
+
+
+def handle_key(state: CarState, args: argparse.Namespace) -> int:
+    action = args.action or "verify"
+
+    if action != "verify":
+        console.print("Unknown key action")
+        return 1
+
+    key = resolve_openrouter_key(state)
+    if not key:
+        console.print("OpenRouter key not found.", style="red")
+        if state.key_helper:
+            console.print(f"Run: {state.key_helper}")
+        return 1
+
+    try:
+        payload = verify_api_key(state.openrouter_base_url, key)
+    except OpenRouterError as exc:
+        console.print(f"Key verification failed: {exc}", style="red")
+        return 1
+
+    details = payload.get("data") if isinstance(payload, dict) else None
+    label = details.get("label") if isinstance(details, dict) else None
+    usage = details.get("usage") if isinstance(details, dict) else None
+
+    console.print("OpenRouter API key is valid", style="green")
+    if label:
+        console.print(f"Key label: {label}")
+    if usage is not None:
+        console.print(f"Usage: {usage}")
     return 0
 
 

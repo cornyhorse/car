@@ -50,6 +50,13 @@ def test_build_parser_parses_model_list_provider_filter():
     assert ns.provider == "openai,google"
 
 
+def test_build_parser_parses_key_verify():
+    parser = cli.build_parser()
+    ns = parser.parse_args(["key", "verify"])
+    assert ns.command == "key"
+    assert ns.action == "verify"
+
+
 def test_main_routes_no_args(monkeypatch):
     monkeypatch.setattr(cli, "launch_copilot", lambda args: 7)
     assert cli.main([]) == 7
@@ -148,18 +155,33 @@ def test_dispatch_subcommand_all_branches(monkeypatch):
     monkeypatch.setattr(cli, "load_state", lambda: st)
     monkeypatch.setattr(cli, "handle_model", lambda state, args: 1)
     monkeypatch.setattr(cli, "handle_provider", lambda state, args: 2)
-    monkeypatch.setattr(cli, "handle_env", lambda state: 3)
-    monkeypatch.setattr(cli, "handle_doctor", lambda state: 4)
-    monkeypatch.setattr(cli, "handle_tui", lambda state: 5)
-    monkeypatch.setattr(cli, "handle_config", lambda: 6)
+    monkeypatch.setattr(cli, "handle_key", lambda state, args: 3)
+    monkeypatch.setattr(cli, "handle_env", lambda state: 4)
+    monkeypatch.setattr(cli, "handle_doctor", lambda state: 5)
+    monkeypatch.setattr(cli, "handle_tui", lambda state: 6)
+    monkeypatch.setattr(cli, "handle_config", lambda: 7)
 
     assert cli.dispatch_subcommand(_args(command="model")) == 1
     assert cli.dispatch_subcommand(_args(command="provider")) == 2
-    assert cli.dispatch_subcommand(_args(command="env")) == 3
-    assert cli.dispatch_subcommand(_args(command="doctor")) == 4
-    assert cli.dispatch_subcommand(_args(command="tui")) == 5
-    assert cli.dispatch_subcommand(_args(command="config")) == 6
+    assert cli.dispatch_subcommand(_args(command="key")) == 3
+    assert cli.dispatch_subcommand(_args(command="env")) == 4
+    assert cli.dispatch_subcommand(_args(command="doctor")) == 5
+    assert cli.dispatch_subcommand(_args(command="tui")) == 6
+    assert cli.dispatch_subcommand(_args(command="config")) == 7
     assert cli.dispatch_subcommand(_args(command="other")) == 1
+
+
+def test_main_routes_key_without_action_to_help(monkeypatch):
+    seen = {"parsed": None}
+
+    class _Parser:
+        def parse_args(self, args):
+            seen["parsed"] = args
+            raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "build_parser", lambda: _Parser())
+    assert cli.main(["key"]) == 0
+    assert seen["parsed"] == ["key", "--help"]
 
 
 def test_handle_model_list_from_cache(monkeypatch):
@@ -388,6 +410,43 @@ def test_handle_env_without_helper_does_not_print_hint(monkeypatch):
     assert cli.handle_env(st) == 0
     text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
     assert "Hint: run" not in text_blob
+
+
+def test_handle_key_paths(monkeypatch):
+    st = CarState(openrouter_base_url="u", key_helper="car key --set")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda _state: None)
+    assert cli.handle_key(st, _args(action="verify")) == 1
+
+    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda _state: "tok")
+    monkeypatch.setattr(cli, "verify_api_key", lambda _url, _key: {"data": {"label": "main", "usage": 12}})
+    assert cli.handle_key(st, _args(action="verify")) == 0
+
+    def boom(_url, _key):
+        raise OpenRouterError("bad")
+
+    monkeypatch.setattr(cli, "verify_api_key", boom)
+    assert cli.handle_key(st, _args(action="verify")) == 1
+    assert cli.handle_key(st, _args(action="unknown")) == 1
+
+
+def test_handle_key_no_helper_and_optional_fields(monkeypatch):
+    st = CarState(openrouter_base_url="u", key_helper="")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    # Covers missing-key path without helper message.
+    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda _state: None)
+    assert cli.handle_key(st, _args(action="verify")) == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Run:" not in text_blob
+
+    # Covers success path where label/usage are absent.
+    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda _state: "tok")
+    monkeypatch.setattr(cli, "verify_api_key", lambda _url, _key: {"data": {}})
+    assert cli.handle_key(st, _args(action="verify")) == 0
 
 
 def test_handle_doctor_success_and_failure(monkeypatch):

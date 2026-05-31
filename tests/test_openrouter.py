@@ -82,6 +82,82 @@ def test_refresh_models_success(monkeypatch, tmp_path):
     assert "refreshed_at" in saved
 
 
+def test_verify_api_key_success(monkeypatch):
+    payload = {"data": {"label": "main"}}
+    monkeypatch.setattr(openrouter, "urlopen", lambda *a, **k: _Resp(payload))
+
+    out = openrouter.verify_api_key("https://openrouter.ai/api/v1", "tok")
+    assert out["data"]["label"] == "main"
+
+
+def test_verify_api_key_empty_token():
+    with pytest.raises(openrouter.OpenRouterError, match="empty"):
+        openrouter.verify_api_key("https://example", "  ")
+
+
+def test_verify_api_key_http_error(monkeypatch):
+    req = HTTPError("u", 401, "bad", hdrs=None, fp=BytesIO(b""))
+    monkeypatch.setattr(openrouter, "urlopen", lambda *a, **k: (_ for _ in ()).throw(req))
+
+    with pytest.raises(openrouter.OpenRouterError, match="rejected"):
+        openrouter.verify_api_key("https://example", "tok")
+
+
+def test_verify_api_key_http_error_non_auth(monkeypatch):
+    req = HTTPError("u", 500, "bad", hdrs=None, fp=BytesIO(b""))
+    monkeypatch.setattr(openrouter, "urlopen", lambda *a, **k: (_ for _ in ()).throw(req))
+
+    with pytest.raises(openrouter.OpenRouterError, match="HTTP error: 500"):
+        openrouter.verify_api_key("https://example", "tok")
+
+
+def test_verify_api_key_url_error(monkeypatch):
+    monkeypatch.setattr(
+        openrouter,
+        "urlopen",
+        lambda *a, **k: (_ for _ in ()).throw(URLError("no network")),
+    )
+
+    with pytest.raises(openrouter.OpenRouterError, match="network error"):
+        openrouter.verify_api_key("https://example", "tok")
+
+
+def test_verify_api_key_timeout(monkeypatch):
+    monkeypatch.setattr(
+        openrouter,
+        "urlopen",
+        lambda *a, **k: (_ for _ in ()).throw(TimeoutError()),
+    )
+
+    with pytest.raises(openrouter.OpenRouterError, match="timed out"):
+        openrouter.verify_api_key("https://example", "tok")
+
+
+class _BadResp:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return b"not-json"
+
+
+def test_verify_api_key_invalid_json(monkeypatch):
+    monkeypatch.setattr(openrouter, "urlopen", lambda *a, **k: _BadResp())
+
+    with pytest.raises(openrouter.OpenRouterError, match="invalid JSON"):
+        openrouter.verify_api_key("https://example", "tok")
+
+
+def test_verify_api_key_unexpected_response_type(monkeypatch):
+    monkeypatch.setattr(openrouter, "urlopen", lambda *a, **k: _Resp(["not", "dict"]))
+
+    with pytest.raises(openrouter.OpenRouterError, match="unexpected response"):
+        openrouter.verify_api_key("https://example", "tok")
+
+
 def test_refresh_models_http_error(monkeypatch):
     req = HTTPError("u", 401, "bad", hdrs=None, fp=BytesIO(b""))
     monkeypatch.setattr(openrouter, "urlopen", lambda *a, **k: (_ for _ in ()).throw(req))

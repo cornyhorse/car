@@ -95,6 +95,44 @@ def refresh_models(
     return rows
 
 
+def verify_api_key(base_url: str, api_key: str) -> dict[str, Any]:
+    token = api_key.strip()
+    if not token:
+        raise OpenRouterError("OpenRouter API key is empty")
+
+    url = f"{base_url.rstrip('/')}/auth/key"
+    req = Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+    )
+
+    try:
+        with urlopen(req, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise OpenRouterError(
+                f"OpenRouter API key rejected (HTTP {exc.code})"
+            ) from exc
+        raise OpenRouterError(f"OpenRouter HTTP error: {exc.code}") from exc
+    except URLError as exc:
+        raise OpenRouterError(
+            f"OpenRouter network error: {exc.reason}"
+        ) from exc
+    except TimeoutError as exc:
+        raise OpenRouterError("OpenRouter request timed out") from exc
+    except json.JSONDecodeError as exc:
+        raise OpenRouterError("OpenRouter returned invalid JSON") from exc
+
+    if not isinstance(payload, dict):
+        raise OpenRouterError("OpenRouter returned an unexpected response")
+
+    return payload
+
+
 def load_cached_models(
     cache_path: Path | None = None,
 ) -> tuple[list[ModelEntry], str | None]:
