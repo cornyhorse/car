@@ -6,15 +6,18 @@ from car import tui
 
 
 class _FakeApp:
-    def __init__(self, models, selected_model, provider_lock, favorite_models, route_mode):
+    def __init__(self, models, selected_model, provider_lock,
+                 favorite_models, route_mode, harness="copilot"):
         self.models = models
         self.selected_model = selected_model
         self.provider_lock = provider_lock
         self.favorite_models = favorite_models
         self.route_mode = route_mode
+        self.harness = harness
 
     def run(self):
-        return ("picked/model", "aws-bedrock", "provider", ["picked/model"])
+        return ("picked/model", "aws-bedrock", "provider",
+                ["picked/model"], "copilot")
 
 
 class _FakeNode:
@@ -89,13 +92,16 @@ class _FakeEvent:
         self.node = SimpleNamespace(label=label)
 
 
-def _fake_tui(models, favorites=None, provider_lock=None, selected_model=None, route_mode="model"):
+def _fake_tui(models, favorites=None, provider_lock=None,
+               selected_model=None, route_mode="model",
+               harness="copilot"):
     app = tui.CarTui.__new__(tui.CarTui)
     app.models = models
     app.selected_model = selected_model
     app.provider_lock = provider_lock
     app.favorite_models = favorites or []
     app.route_mode = route_mode
+    app.harness = harness
     app.current_provider_filter = provider_lock
     app.selected_provider_for_lock = provider_lock
     app._tree = _FakeTree()
@@ -128,7 +134,10 @@ def test_fmt_price():
 def test_run_tui(monkeypatch):
     monkeypatch.setattr(tui, "CarTui", _FakeApp)
     result = tui.run_tui([], "a/b", None, ["a/b"], "model")
-    assert result == ("picked/model", "aws-bedrock", "provider", ["picked/model"])
+    assert result == (
+        "picked/model", "aws-bedrock", "provider",
+        ["picked/model"], "copilot",
+    )
 
 
 def test_model_picked_message_fields():
@@ -257,3 +266,35 @@ def test_row_selected_event_picks_model():
     event = SimpleNamespace(data_table=SimpleNamespace(id="models"))
     app.on_data_table_row_selected(event)
     assert captured["called"] == 1
+
+
+def test_toggle_harness():
+    app = _fake_tui([
+        tui.ModelEntry("a/model", "a", None, None, None),
+    ], harness="copilot")
+    app._build_provider_tree()
+    app._setup_table()
+    app._load_models()
+
+    assert app.harness == "copilot"
+    app.action_toggle_harness()
+    assert app.harness == "claude"
+    assert "Claude" in app._status.value
+
+    app.action_toggle_harness()
+    assert app.harness == "copilot"
+    assert "Copilot" in app._status.value
+
+
+def test_toggle_lock_with_no_provider():
+    app = _fake_tui([
+        tui.ModelEntry("a/model", "a", None, None, None),
+    ])
+    app.selected_provider_for_lock = None
+    app._build_provider_tree()
+    app._setup_table()
+    app._load_models()
+
+    app.action_toggle_lock()
+    assert app.provider_lock is None
+    assert "cleared" in app._status.value

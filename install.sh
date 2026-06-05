@@ -8,8 +8,10 @@ CAR_HOME="${CAR_HOME:-$HOME/.local/share/car}"
 CAR_BIN_DIR="${CAR_BIN_DIR:-$HOME/.local/bin}"
 CAR_WRAPPER="$CAR_BIN_DIR/car"
 CAR_COPILOT_INSTALL_URL="${CAR_COPILOT_INSTALL_URL:-https://gh.io/copilot-install}"
+CAR_CLAUDE_INSTALL_URL="${CAR_CLAUDE_INSTALL_URL:-https://claude.ai/install.sh}"
 CAR_DOCKER_IMAGE="${CAR_DOCKER_IMAGE:-car-dev:latest}"
 CAR_INSTALL_MODE="${CAR_INSTALL_MODE:-ask}"
+CAR_HARNESS="${CAR_HARNESS:-ask}"
 CAR_NONINTERACTIVE="${CAR_NONINTERACTIVE:-0}"
 CAR_FORCE="${CAR_FORCE:-0}"
 CAR_CONFIGURE_KEYS="${CAR_CONFIGURE_KEYS:-ask}"
@@ -79,6 +81,7 @@ Options:
   --mode docker|venv           Install mode.
   --non-interactive            Disable all prompts.
   --force                      Force reinstall/rebuild where supported.
+  --harness copilot|claude|both  AI harness(es) to install.
   --configure-keys             Run key setup wizard at the end.
   --skip-configure-keys        Skip key setup wizard.
   --with-mattstash-docker      Recommend mattstash compose profile at end.
@@ -99,6 +102,10 @@ parse_args() {
         ;;
       --force)
         CAR_FORCE="1"
+        ;;
+      --harness)
+        shift
+        CAR_HARNESS="${1:-}"
         ;;
       --configure-keys)
         CAR_CONFIGURE_KEYS="1"
@@ -185,6 +192,44 @@ choose_install_mode() {
   fi
 
   log "Install mode: $CAR_INSTALL_MODE"
+}
+
+choose_harness() {
+  if [ "$CAR_HARNESS" != "ask" ]; then
+    case "$CAR_HARNESS" in
+      copilot|claude|both)
+        log "Harness selection: $CAR_HARNESS"
+        return
+        ;;
+      *)
+        printf 'Invalid harness: %s\n' "$CAR_HARNESS" >&2
+        printf 'Valid: copilot, claude, both\n' >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  if can_prompt; then
+    printf '\n[car-install] Which AI harness(es) would you like to install?\n'
+    printf '  1) Copilot CLI  (current default)\n'
+    printf '  2) Claude Code CLI\n'
+    printf '  3) Both\n'
+    read -r -p 'Choice [1/2/3] (default 1): ' choice </dev/tty
+    case "$choice" in
+      2)
+        CAR_HARNESS="claude"
+        ;;
+      3)
+        CAR_HARNESS="both"
+        ;;
+      *)
+        CAR_HARNESS="copilot"
+        ;;
+    esac
+  else
+    CAR_HARNESS="copilot"
+    log "No interactive terminal; defaulting to Copilot CLI"
+  fi
 }
 
 append_path_export_if_missing() {
@@ -462,17 +507,41 @@ copilot_extension_installed() {
     return 1
   fi
 
-  gh extension list 2>/dev/null | grep -Eiq '(^|[[:space:]])(github/)?gh-copilot([[:space:]]|$)'
+  gh extension list 2>/dev/null \
+    | grep -Eiq '(^|[[:space:]])(github/)?gh-copilot([[:space:]]|$)'
 }
 
-ensure_gh_copilot_installed() {
-  if command -v gh >/dev/null 2>&1 && copilot_extension_installed; then
-    log "Detected GitHub CLI with Copilot extension"
-    return
+claude_cli_installed() {
+  command -v claude >/dev/null 2>&1
+}
+
+ensure_harnesses_installed() {
+  local install_copilot=0
+  local install_claude=0
+
+  case "$CAR_HARNESS" in
+    copilot) install_copilot=1 ;;
+    claude)  install_claude=1 ;;
+    both)    install_copilot=1; install_claude=1 ;;
+  esac
+
+  if [ "$install_copilot" = "1" ]; then
+    if command -v gh >/dev/null 2>&1 && copilot_extension_installed; then
+      log "Detected GitHub CLI with Copilot extension"
+    else
+      log "Installing GitHub Copilot CLI via $CAR_COPILOT_INSTALL_URL"
+      curl -fsSL "$CAR_COPILOT_INSTALL_URL" | bash
+    fi
   fi
 
-  log "Installing GitHub Copilot CLI via $CAR_COPILOT_INSTALL_URL"
-  curl -fsSL "$CAR_COPILOT_INSTALL_URL" | bash
+  if [ "$install_claude" = "1" ]; then
+    if claude_cli_installed; then
+      log "Detected Claude Code CLI"
+    else
+      log "Installing Claude Code CLI via $CAR_CLAUDE_INSTALL_URL"
+      curl -fsSL "$CAR_CLAUDE_INSTALL_URL" | bash
+    fi
+  fi
 }
 
 ensure_mattstash_initialized() {
@@ -696,6 +765,7 @@ main() {
   require_cmd curl
 
   choose_install_mode
+  choose_harness
 
   if [ "$CAR_INSTALL_MODE" = "docker" ]; then
     require_cmd docker
@@ -706,7 +776,7 @@ main() {
     check_python_venv_available
   fi
 
-  ensure_gh_copilot_installed
+  ensure_harnesses_installed
   clone_or_update_repo
   ensure_host_tools
 

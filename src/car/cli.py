@@ -13,8 +13,15 @@ from car.copilot import (
     check_copilot_extension,
     check_gh_auth,
     check_gh_installed,
-    copilot_env,
-    exec_copilot,
+)
+from car.harness import (
+    DoctorResult,
+    HarnessName,
+    build_harness_env,
+    check_claude_installed,
+    detect_available_harnesses,
+    exec_harness,
+    harness_display_name,
 )
 from car.openrouter import (
     OpenRouterError,
@@ -47,11 +54,14 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=dedent(
             """
-            car wraps Copilot CLI with OpenRouter model + provider controls.
+            car wraps AI harnesses (Copilot CLI / Claude Code) with OpenRouter
+            model + provider controls.
 
             Default behavior:
-            - Running `car` with no args launches Copilot in interactive mode.
-            - Running an unrecognized command passes args through to Copilot.
+            - Running `car` with no args launches the selected harness in
+              interactive mode.
+            - Running an unrecognized command passes args through to the
+              selected harness.
 
             CLI mode examples:
             - `car --cli suggest "write a safer bash script"`
@@ -59,7 +69,10 @@ def build_parser() -> argparse.ArgumentParser:
             - `car explain "docker compose run --rm car"`
 
             car management examples:
-            - `car doctor`                     # verify gh/auth/key/cache
+            - `car doctor`                     # verify harness/auth/key/cache
+            - `car harness list`               # show available AI harnesses
+            - `car harness use claude`          # switch to Claude Code
+            - `car --harness`                   # pick harness interactively
             - `car model list`                 # show cached models/pricing
             - `car model list --provider=openai,google`
             - `car model refresh`              # force refresh pricing cache
@@ -72,9 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
             - Change model: `car model list` then `car model use <model_id>`
             - Favorite model: `car model favorite-add <model_id>`
             - Lock provider: `car provider lock <provider>`
+            - Switch harness: `car harness use claude`
 
             Troubleshooting:
-            - Missing auth: run `gh auth login`
+            - Missing auth: run `gh auth login` (for Copilot)
             - Missing key: store in mattstash or set OPENROUTER_API_KEY
             - Empty cache: run `car model refresh`
             - Update wrapper/tools: run `car --update`
@@ -149,6 +163,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("tui", help="Open Textual model selector")
     sub.add_parser("config", help="Print state file path")
 
+    harness_parser = sub.add_parser("harness", help="AI harness selection")
+    harness_sub = harness_parser.add_subparsers(dest="action")
+    harness_sub.add_parser("list", help="List available AI harnesses")
+    harness_sub.add_parser("ls", help="Alias for list")
+    harness_use = harness_sub.add_parser("use", help="Set active harness")
+    harness_use.add_argument("name", choices=["copilot", "claude"])
+    harness_sub.add_parser("current", help="Show current harness")
+
     return parser
 
 
@@ -164,7 +186,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not argv:
-        return launch_copilot([])
+        return launch_harness([])
+
+    # ── --harness flag (interactive picker or direct set) ──────────────
+    if argv and argv[0] == "--harness":
+        if len(argv) == 1:
+            # No harness specified — interactive selection
+            return handle_harness_pick()
+        # Direct set: car --harness copilot [rest...]
+        harness_name = argv[1]
+        return handle_harness_set_and_launch(harness_name, argv[2:])
 
     if argv == ["model"]:
         try:
@@ -178,11 +209,15 @@ def main(argv: list[str] | None = None) -> int:
         except SystemExit:
             return 0
 
-    if argv[0] in {"model", "provider", "key", "env", "doctor", "tui", "config"}:
+    known = {
+        "model", "provider", "key", "env",
+        "doctor", "tui", "config", "harness",
+    }
+    if argv[0] in known:
         args = parser.parse_args(argv)
         return dispatch_subcommand(args)
 
-    return launch_copilot(argv)
+    return launch_harness(argv)
 
 
 def dispatch_subcommand(args: argparse.Namespace) -> int:
@@ -202,6 +237,8 @@ def dispatch_subcommand(args: argparse.Namespace) -> int:
         return handle_tui(state)
     if args.command == "config":
         return handle_config()
+    if args.command == "harness":
+        return handle_harness(state, args)
     return 1
 
 
@@ -268,7 +305,9 @@ def handle_model(state: CarState, args: argparse.Namespace) -> int:
         return 0
 
     if action == "favorite-remove":
-        state.favorite_models = [m for m in state.favorite_models if m != args.model_id]
+        state.favorite_models = [
+            m for m in state.favorite_models if m != args.model_id
+        ]
         save_state(state)
         console.print(f"Removed favorite: {args.model_id}")
         return 0
@@ -341,15 +380,26 @@ def handle_provider(state: CarState, args: argparse.Namespace) -> int:
 def handle_env(state: CarState) -> int:
     key = resolve_openrouter_key(state)
     model = selected_model(state)
+    harness = state.harness
+    is_claude = harness == "claude"
 
-    console.print(f"COPILOT_PROVIDER_BASE_URL={state.openrouter_base_url}")
-    console.print(f"COPILOT_MODEL={model}")
+    console.print(f"CAR_HARNESS={harness}")
+
+    url_var = (
+        "ANTHROPIC_BASE_URL" if is_claude else "COPILOT_PROVIDER_BASE_URL"
+    )
+    model_var = "ANTHROPIC_MODEL" if is_claude else "COPILOT_MODEL"
+    key_var = "ANTHROPIC_API_KEY" if is_claude else "COPILOT_PROVIDER_API_KEY"
+
+    console.print(f"{url_var}={state.openrouter_base_url}")
+    console.print(f"{model_var}={model}")
     console.print(f"CAR_PROVIDER_LOCK={state.provider_lock or ''}")
     console.print(f"CAR_ROUTE_MODE={state.route_mode}")
+
     if key:
-        console.print("COPILOT_PROVIDER_API_KEY=<set>")
+        console.print(f"{key_var}=<set>")
     else:
-        console.print("COPILOT_PROVIDER_API_KEY=<unset>")
+        console.print(f"{key_var}=<unset>")
         if state.key_helper:
             console.print(f"Hint: run {state.key_helper}")
     return 0
@@ -435,56 +485,54 @@ def handle_key(state: CarState, args: argparse.Namespace) -> int:
 
 
 def handle_doctor(state: CarState) -> int:
-    checks = [
-        check_gh_installed(),
-        check_copilot_extension(),
-        check_gh_auth(),
-    ]
+    harness = state.harness
+    checks: list = []
+
+    available = detect_available_harnesses()
+    checks.append(_doctor(
+        "harness",
+        harness in available,
+        f"Selected: {harness_display_name(harness)}; "
+        f"available: {', '.join(available) if available else 'none'}",
+    ))
+
+    if harness == "copilot":
+        checks += [
+            check_gh_installed(),
+            check_copilot_extension(),
+            check_gh_auth(),
+        ]
+    else:
+        checks.append(check_claude_installed())
 
     key = resolve_openrouter_key(state)
-    checks.append(
-        type("_Doctor", (), {
-            "name": "openrouter-key",
-            "ok": bool(key),
-            "detail": (
-                "Key resolved"
-                if key
-                else "No key found in env or mattstash"
-            ),
-        })()
-    )
+    checks.append(_doctor(
+        "openrouter-key",
+        bool(key),
+        "Key resolved" if key else "No key found in env or mattstash",
+    ))
 
     rows, _ = load_cached_models()
-    checks.append(
-        type("_Doctor", (), {
-            "name": "model-cache",
-            "ok": bool(rows),
-            "detail": (
-                f"{len(rows)} cached models"
-                if rows
-                else "Cache empty; run car model refresh"
-            ),
-        })()
+    cache_detail = (
+        f"{len(rows)} cached models"
+        if rows else "Cache empty; run car model refresh"
     )
+    checks.append(_doctor("model-cache", bool(rows), cache_detail))
 
     model = selected_model(state)
     prompt_tokens, output_tokens = resolve_model_token_limits(model)
-    checks.append(
-        type("_Doctor", (), {
-            "name": "model-token-limits",
-            "ok": prompt_tokens is not None and output_tokens is not None,
-            "detail": (
-                (
-                    f"prompt={prompt_tokens}, output={output_tokens} for {model}"
-                )
-                if prompt_tokens is not None and output_tokens is not None
-                else (
-                    f"No cached token limits for {model}; "
-                    "Copilot may use provider defaults"
-                )
-            ),
-        })()
-    )
+    has_limits = prompt_tokens is not None and output_tokens is not None
+    harness_label = "Copilot" if harness == "copilot" else "Claude Code"
+    if has_limits:
+        limit_detail = (
+            f"prompt={prompt_tokens}, output={output_tokens} for {model}"
+        )
+    else:
+        limit_detail = (
+            f"No cached token limits for {model}; "
+            f"{harness_label} may use provider defaults"
+        )
+    checks.append(_doctor("model-token-limits", has_limits, limit_detail))
 
     ok = True
     for check in checks:
@@ -514,21 +562,23 @@ def handle_tui(state: CarState) -> int:
         state.provider_lock,
         state.favorite_models,
         state.route_mode,
+        state.harness,
     )
     if not outcome:
         return 0
 
-    model_id, provider_lock, route_mode, favorites = outcome
+    model_id, provider_lock, route_mode, favorites, harness = outcome
     state.selected_model = model_id
     state.provider_lock = provider_lock
     state.route_mode = route_mode
     state.favorite_models = favorites
+    state.harness = harness
     save_state(state)
 
     console.print(f"Selected model: {model_id}")
     console.print(f"Provider lock: {provider_lock or '<none>'}")
     console.print(f"Route mode: {route_mode}")
-    return launch_copilot([])
+    return launch_harness([])
 
 
 def handle_config() -> int:
@@ -536,11 +586,12 @@ def handle_config() -> int:
     return 0
 
 
-def launch_copilot(
-    copilot_args: list[str],
+def launch_harness(
+    harness_args: list[str],
     backend: str | None = None,
 ) -> int:
     state = load_state()
+    harness: HarnessName = state.harness  # type: ignore[assignment]
     key = resolve_openrouter_key(state)
     if not key:
         console.print("OpenRouter key not found.", style="red")
@@ -551,22 +602,176 @@ def launch_copilot(
     ensure_models_fresh(state)
 
     model = selected_model(state)
-    env = copilot_env(state.openrouter_base_url, key, model)
+    env = build_harness_env(harness, state.openrouter_base_url, key, model)
 
     max_prompt_tokens, max_output_tokens = resolve_model_token_limits(model)
-    if max_prompt_tokens is not None:
-        env["COPILOT_PROVIDER_MAX_PROMPT_TOKENS"] = str(max_prompt_tokens)
-    if max_output_tokens is not None:
-        env["COPILOT_PROVIDER_MAX_OUTPUT_TOKENS"] = str(max_output_tokens)
+    if harness == "copilot":
+        if max_prompt_tokens is not None:
+            env["COPILOT_PROVIDER_MAX_PROMPT_TOKENS"] = str(max_prompt_tokens)
+        if max_output_tokens is not None:
+            env["COPILOT_PROVIDER_MAX_OUTPUT_TOKENS"] = str(max_output_tokens)
 
-    # Provider lock is a local policy for model filtering and state.
-    # We surface it here for future integrations that can pass routing hints.
     if state.provider_lock:
         env["CAR_PROVIDER_LOCK"] = state.provider_lock
         env["CAR_PROVIDER_LOCK_MODE"] = state.provider_lock_mode
     env["CAR_ROUTE_MODE"] = state.route_mode
 
-    return exec_copilot(copilot_args, env, backend=backend)
+    return exec_harness(harness, harness_args, env, backend=backend)
+
+
+# Backward-compatible alias used by `--cli` and tests.
+launch_copilot = launch_harness
+
+
+# ── Harness subcommand handlers ──────────────────────────────────────────────
+
+
+_CO = "curl -fsSL"
+
+
+def handle_harness(state: CarState, args: argparse.Namespace) -> int:
+    action = args.action or "current"
+
+    if action in {"list", "ls"}:
+        available = detect_available_harnesses()
+        if not available:
+            console.print("No AI harnesses detected", style="yellow")
+            console.print(
+                "Install Copilot CLI: "
+                + _CO + " https://gh.io/copilot-install | bash"
+            )
+            console.print(
+                "Install Claude Code: "
+                + _CO + " https://claude.ai/install.sh | bash"
+            )
+            return 1
+        for h in available:
+            marker = " *" if h == state.harness else "  "
+            console.print(f"{marker} {h}  ({harness_display_name(h)})")
+        return 0
+
+    if action == "use":
+        name = args.name
+        # argparse already enforces choices=["copilot","claude"] so this
+        # branch is a safety net in case handle_harness is called directly.
+        if name not in {"copilot", "claude"}:
+            console.print(f"Unknown harness: {name}", style="red")
+            return 1
+        available = detect_available_harnesses()
+        if name not in available:
+            console.print(
+                f"Harness '{name}' is not installed.", style="yellow"
+            )
+            if name == "claude":
+                console.print(
+                    "Install: curl -fsSL https://claude.ai/install.sh | bash"
+                )
+            else:
+                console.print(
+                    "Install: gh extension install github/gh-copilot"
+                )
+            console.print(
+                f"To force-set: CAR_HARNESS={name} car harness use {name}"
+            )
+            return 1
+        state.harness = name
+        save_state(state)
+        console.print(f"Active harness: {harness_display_name(name)}")
+        return 0
+
+    if action == "current":
+        console.print(f"Harness: {harness_display_name(state.harness)}")
+        available = detect_available_harnesses()
+        console.print(
+            f"Available: {', '.join(available) if available else 'none'}"
+        )
+        return 0
+
+    return 1
+
+
+def handle_harness_pick() -> int:
+    """Interactive picker for `car --harness` with no arg."""
+    available = detect_available_harnesses()
+    if not available:
+        console.print("No AI harnesses detected.", style="red")
+        console.print(
+            "Install Copilot CLI: "
+            + _CO + " https://gh.io/copilot-install | bash"
+        )
+        console.print(
+            "Install Claude Code: "
+            + _CO + " https://claude.ai/install.sh | bash"
+        )
+        return 1
+
+    if len(available) == 1:
+        state = load_state()
+        state.harness = available[0]
+        save_state(state)
+        console.print(
+            f"Only one harness available. Set to: "
+            f"{harness_display_name(available[0])}"
+        )
+        return 0
+
+    console.print("Available AI harnesses:")
+    for i, h in enumerate(available, 1):
+        console.print(f"  {i}) {harness_display_name(h)}")
+
+    try:
+        # Use sys.stderr so the prompt is visible even when stdout is piped.
+        prompt = f"Select harness [1-{len(available)}]: "
+        sys.stderr.write(prompt)
+        sys.stderr.flush()
+        choice = input().strip()
+        idx = int(choice) - 1
+    except (EOFError, KeyboardInterrupt):
+        console.print("Selection cancelled", style="yellow")
+        return 1
+    except ValueError:
+        console.print("Invalid choice", style="red")
+        return 1
+
+    if idx < 0 or idx >= len(available):
+        console.print("Invalid choice", style="red")
+        return 1
+
+    state = load_state()
+    state.harness = available[idx]
+    save_state(state)
+    console.print(f"Active harness: {harness_display_name(available[idx])}")
+    return 0
+
+
+def handle_harness_set_and_launch(
+    name: str,
+    remaining_args: list[str],
+) -> int:
+    """Set harness from `car --harness <name> [args...]` and launch if args."""
+    if name not in {"copilot", "claude"}:
+        console.print(f"Unknown harness: {name}", style="red")
+        return 1
+
+    state = load_state()
+    state.harness = name
+    save_state(state)
+    console.print(f"Active harness: {harness_display_name(name)}")
+
+    available = detect_available_harnesses()
+    if name not in available:
+        console.print(
+            f"Warning: '{name}' does not appear to be installed.",
+            style="yellow",
+        )
+
+    if remaining_args:
+        return launch_harness(remaining_args)
+    return 0
+
+
+def _doctor(name: str, ok: bool, detail: str) -> DoctorResult:
+    return DoctorResult(name=name, ok=ok, detail=detail)
 
 
 def ensure_models_fresh(state: CarState, max_age_hours: int = 24) -> None:

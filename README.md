@@ -1,12 +1,13 @@
 # car
 
-car is a wrapper around GitHub Copilot CLI that injects OpenRouter settings,
-persists model selection, and adds a Textual TUI for model/provider selection.
+car wraps AI coding assistants (GitHub Copilot CLI and Claude Code CLI) with
+OpenRouter model + provider controls, persistent state, and a Textual TUI.
 
 ## What It Does
 
-- Runs gh copilot with OpenRouter environment variables already set.
-- Stores selected model and provider lock in local state.
+- Supports two AI harnesses: **Copilot CLI** (gh-copilot) and **Claude Code CLI**.
+- Routes both harnesses through OpenRouter by injecting the right env vars.
+- Stores selected harness, model, and provider lock in local state.
 - Fetches and caches OpenRouter model metadata (pricing and context length).
 - Provides a TUI with provider list on the left and model table on the right.
 - Supports optional provider lock (for example aws-bedrock) when selecting models.
@@ -26,7 +27,9 @@ Use `--non-interactive` to disable prompts.
 
 Installer behavior:
 
+- Prompts for which harness(es) to install: Copilot CLI, Claude Code CLI, or both
 - Installs or updates GitHub CLI + gh-copilot using https://gh.io/copilot-install
+- Installs Claude Code CLI using https://claude.ai/install.sh when selected
 - Prompts for install mode (docker or venv) by default
 - Clones or updates this repo at ~/.local/share/car
 - Creates a shared tools venv at ~/.local/share/car/venv-tools
@@ -41,11 +44,14 @@ Installer behavior:
 Non-interactive examples:
 
 ```bash
-# Deterministic docker install without prompts
-bash install.sh --mode docker --non-interactive --skip-configure-keys
+# Deterministic docker install with both harnesses, no prompts
+bash install.sh --mode docker --harness both --non-interactive --skip-configure-keys
 
-# Host venv install and key setup wizard
-bash install.sh --mode venv --configure-keys
+# Install Copilot CLI only (default) in venv mode with key setup
+bash install.sh --mode venv --harness copilot --configure-keys
+
+# Install Claude Code CLI only
+bash install.sh --harness claude
 ```
 
 Force refresh:
@@ -101,7 +107,7 @@ export OPENROUTER_API_KEY="..."
 
 ## Usage
 
-Launch Copilot with configured settings:
+Launch the active AI harness with configured settings:
 
 ```bash
 car
@@ -116,11 +122,22 @@ car --update
 `car --update` re-runs the installer in your current mode (docker or venv).
 It forces a rebuild/reinstall so code changes are picked up immediately.
 
-Pass through arguments to gh copilot:
+Pass through arguments to the active harness:
 
 ```bash
-car suggest "write a safer bash script"
-car --cli suggest "force gh copilot backend"
+car suggest "write a safer bash script"     # Copilot
+car --cli suggest "force gh copilot backend" # Copilot, gh backend
+```
+
+Harness selection:
+
+```bash
+car harness list               # show detected harnesses (* = active)
+car harness use copilot        # switch to Copilot CLI
+car harness use claude         # switch to Claude Code CLI
+car harness current            # show active harness
+car --harness                  # interactive picker (if both installed)
+car --harness claude           # set claude and return to shell
 ```
 
 Model commands:
@@ -163,8 +180,9 @@ Inside TUI:
 - Arrow keys navigate providers/models.
 - Esc returns focus to the provider list.
 - Selecting the root Providers node keeps the list expanded.
-- Enter selects the model, saves it, closes the TUI, and launches Copilot.
+- Enter selects the model, saves it, closes the TUI, and launches the active harness.
 - F toggles favorite for selected model.
+- H toggles active harness between Copilot and Claude Code.
 - L toggles provider lock for current provider filter.
 - R toggles route mode:
 	- model: select model independent of provider lock
@@ -205,6 +223,7 @@ Model cache refresh behavior:
 
 State stores:
 
+- harness (copilot or claude, default: copilot)
 - openrouter_base_url
 - default_model
 - selected_model
@@ -213,6 +232,26 @@ State stores:
 - provider_lock_mode
 - route_mode
 - key_name/mattstash settings
+
+Override harness at runtime without saving:
+
+```bash
+CAR_HARNESS=claude car
+```
+
+## Claude Code + OpenRouter
+
+When harness is `claude`, car sets these env vars before launching Claude Code:
+
+| Variable | Value |
+|---|---|
+| `ANTHROPIC_BASE_URL` | OpenRouter base URL (e.g. `https://openrouter.ai/api/v1`) |
+| `ANTHROPIC_API_KEY` | Your OpenRouter API key |
+| `ANTHROPIC_MODEL` | Selected model ID (e.g. `anthropic/claude-opus-4-5`) |
+
+This routes Claude Code through OpenRouter, giving you the same model/provider
+controls as Copilot mode. Run `car model refresh` and `car model list` to browse
+available models regardless of which harness is active.
 
 ## Notes On Provider Lock
 

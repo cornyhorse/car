@@ -10,6 +10,9 @@ services:
       - ${HOME}/.config/car:/home/car/.config/car
       - ${HOME}/.cache/car:/home/car/.cache/car
       - ${HOME}/.config/gh:/home/car/.config/gh:ro
+      # Claude Code stores auth tokens and session data in ~/.claude.
+      # Create it first if needed: mkdir -p ~/.claude
+      - ${HOME}/.claude:/home/car/.claude
     environment:
       - CAR_OPENROUTER_API_KEY
       - OPENROUTER_API_KEY

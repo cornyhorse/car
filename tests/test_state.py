@@ -19,6 +19,7 @@ def test_load_state_defaults_when_missing(monkeypatch, tmp_path):
     assert result.default_model == "openai/gpt-4o-mini"
     assert result.provider_lock_mode == "strict"
     assert result.route_mode == "model"
+    assert result.harness == "copilot"
     assert result.favorite_models == []
 
 
@@ -107,6 +108,26 @@ def test_load_state_invalid_json_falls_back(monkeypatch, tmp_path):
     result = state.load_state()
 
     assert isinstance(result, state.CarState)
+
+
+def test_load_state_applies_harness_override(monkeypatch, tmp_path):
+    f = tmp_path / "state.json"
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    monkeypatch.setattr(state, "ensure_dirs", lambda: None)
+    monkeypatch.setenv("CAR_HARNESS", "claude")
+
+    result = state.load_state()
+    assert result.harness == "claude"
+
+
+def test_load_state_ignores_invalid_harness(monkeypatch, tmp_path):
+    f = tmp_path / "state.json"
+    monkeypatch.setattr(state, "state_file", lambda: f)
+    monkeypatch.setattr(state, "ensure_dirs", lambda: None)
+    monkeypatch.setenv("CAR_HARNESS", "invalid")
+
+    result = state.load_state()
+    assert result.harness == "copilot"
 
 
 def test_save_state_writes_json(monkeypatch, tmp_path):

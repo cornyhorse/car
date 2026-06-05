@@ -22,6 +22,7 @@ class CarState:
     key_name: str = "openrouter_api_key"
     mattstash_cli: str = "mattstash"
     key_helper: str = ""
+    harness: str = "copilot"
 
     def __post_init__(self) -> None:
         if self.favorite_models is None:
@@ -41,6 +42,9 @@ def _state_from_dict(data: dict[str, Any]) -> CarState:
 
     if state.route_mode not in {"model", "provider"}:
         state.route_mode = "model"
+
+    if state.harness not in {"copilot", "claude"}:
+        state.harness = "copilot"
 
     return state
 
@@ -156,6 +160,7 @@ def _apply_env_overrides(state: CarState) -> CarState:
     route_mode = os.environ.get("CAR_ROUTE_MODE", "").strip()
     mattstash_cli = os.environ.get("CAR_MATTSTASH_CLI", "").strip()
     key_name = os.environ.get("CAR_MATTSTASH_KEY_NAME", "").strip()
+    harness = os.environ.get("CAR_HARNESS", "").strip()
 
     if base_url:
         state.openrouter_base_url = base_url
@@ -173,6 +178,8 @@ def _apply_env_overrides(state: CarState) -> CarState:
         state.mattstash_cli = mattstash_cli
     if key_name:
         state.key_name = key_name
+    if harness in {"copilot", "claude"}:
+        state.harness = harness
 
     return state
 

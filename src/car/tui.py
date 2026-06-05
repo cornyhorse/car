@@ -17,7 +17,10 @@ class ModelPicked(Message):
         super().__init__()
 
 
-class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no cover
+TuiResult = tuple[str, str | None, str, list[str], str] | None
+
+
+class CarTui(App[TuiResult]):  # pragma: no cover
     CSS = """
     Screen { layout: vertical; }
     #content { height: 1fr; }
@@ -32,6 +35,7 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
         Binding("f", "toggle_favorite", "Toggle Favorite"),
         Binding("l", "toggle_lock", "Toggle Provider Lock"),
         Binding("r", "toggle_route_mode", "Toggle Route Mode"),
+        Binding("h", "toggle_harness", "Toggle Harness"),
         Binding("a", "clear_provider_filter", "All Providers"),
         Binding("q", "quit", "Quit"),
     ]
@@ -43,13 +47,19 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
         provider_lock: str | None,
         favorite_models: list[str],
         route_mode: str,
+        harness: str = "copilot",
     ) -> None:
         super().__init__()
         self.models = models
         self.selected_model = selected_model
         self.provider_lock = provider_lock
         self.favorite_models = list(dict.fromkeys(favorite_models))
-        self.route_mode = route_mode if route_mode in {"model", "provider"} else "model"
+        self.route_mode = (
+            route_mode if route_mode in {"model", "provider"} else "model"
+        )
+        self.harness = (
+            harness if harness in {"copilot", "claude"} else "copilot"
+        )
         self.current_provider_filter = provider_lock
         self.selected_provider_for_lock: str | None = provider_lock
 
@@ -68,8 +78,9 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
         self._setup_table()
         self._load_models()
         self.call_after_refresh(self.action_focus_providers)
+        h_label = "Claude" if self.harness == "claude" else "Copilot"
         self._set_status(
-            "Esc=providers Enter=select F=favorite L=provider lock R=route mode A=all"
+            f"H={h_label} | Esc=prov Enter=sel F=fav L=lock R=route A=all"
         )
 
     def _build_provider_tree(self) -> None:
@@ -203,7 +214,10 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
             provider_lock = provider
 
         self.post_message(ModelPicked(model_id, provider))
-        self.exit((model_id, provider_lock, self.route_mode, self.favorite_models))
+        self.exit((
+            model_id, provider_lock, self.route_mode,
+            self.favorite_models, self.harness,
+        ))
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id == "models":
@@ -230,6 +244,11 @@ class CarTui(App[tuple[str, str | None, str, list[str]] | None]):  # pragma: no 
         else:
             self.route_mode = "model"
             self._set_status("Route mode: model-only")
+
+    def action_toggle_harness(self) -> None:
+        self.harness = "claude" if self.harness == "copilot" else "copilot"
+        h_label = "Claude" if self.harness == "claude" else "Copilot"
+        self._set_status(f"Harness switched to: {h_label}")
 
     def action_clear_provider_filter(self) -> None:
         self._reset_provider_filter()
@@ -273,12 +292,14 @@ def run_tui(
     provider_lock: str | None,
     favorite_models: list[str],
     route_mode: str,
-) -> tuple[str, str | None, str, list[str]] | None:
+    harness: str = "copilot",
+) -> tuple[str, str | None, str, list[str], str] | None:
     app = CarTui(
         models=models,
         selected_model=selected_model,
         provider_lock=provider_lock,
         favorite_models=favorite_models,
         route_mode=route_mode,
+        harness=harness,
     )
     return app.run()

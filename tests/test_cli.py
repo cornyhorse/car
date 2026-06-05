@@ -67,7 +67,7 @@ def test_build_parser_parses_key_set():
 
 
 def test_main_routes_no_args(monkeypatch):
-    monkeypatch.setattr(cli, "launch_copilot", lambda args: 7)
+    monkeypatch.setattr(cli, "launch_harness", lambda args: 7)
     assert cli.main([]) == 7
 
 
@@ -100,7 +100,7 @@ def test_main_routes_help_to_local_parser(monkeypatch):
     monkeypatch.setattr(cli, "build_parser", lambda: _Parser())
     monkeypatch.setattr(
         cli,
-        "launch_copilot",
+        "launch_harness",
         lambda args: seen.update({"launch": seen["launch"] + 1}) or 9,
     )
 
@@ -128,7 +128,7 @@ def test_main_routes_passthrough(monkeypatch):
         received["args"] = args
         return 9
 
-    monkeypatch.setattr(cli, "launch_copilot", fake_launch)
+    monkeypatch.setattr(cli, "launch_harness", fake_launch)
     assert cli.main(["suggest", "hello"]) == 9
     assert received["args"] == ["suggest", "hello"]
 
@@ -169,6 +169,7 @@ def test_dispatch_subcommand_all_branches(monkeypatch):
     monkeypatch.setattr(cli, "handle_doctor", lambda state: 5)
     monkeypatch.setattr(cli, "handle_tui", lambda state: 6)
     monkeypatch.setattr(cli, "handle_config", lambda: 7)
+    monkeypatch.setattr(cli, "handle_harness", lambda state, args: 8)
 
     assert cli.dispatch_subcommand(_args(command="model")) == 1
     assert cli.dispatch_subcommand(_args(command="provider")) == 2
@@ -177,6 +178,7 @@ def test_dispatch_subcommand_all_branches(monkeypatch):
     assert cli.dispatch_subcommand(_args(command="doctor")) == 5
     assert cli.dispatch_subcommand(_args(command="tui")) == 6
     assert cli.dispatch_subcommand(_args(command="config")) == 7
+    assert cli.dispatch_subcommand(_args(command="harness")) == 8
     assert cli.dispatch_subcommand(_args(command="other")) == 1
 
 
@@ -398,12 +400,16 @@ def test_handle_provider_list_refresh_paths(monkeypatch):
 
 
 def test_handle_env(monkeypatch):
-    st = CarState(selected_model="a/b", provider_lock="aws", key_helper="helper")
+    st = CarState(
+        selected_model="a/b", provider_lock="aws", key_helper="helper",
+    )
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
 
     monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "token")
     assert cli.handle_env(st) == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "CAR_HARNESS=copilot" in text_blob
 
     monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: None)
     assert cli.handle_env(st) == 0
@@ -569,6 +575,7 @@ def test_handle_doctor_success_and_failure(monkeypatch):
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
 
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: ["copilot"])
     monkeypatch.setattr(cli, "check_gh_installed", lambda: _Check("gh", True, "ok"))
     monkeypatch.setattr(cli, "check_copilot_extension", lambda: _Check("ext", True, "ok"))
     monkeypatch.setattr(cli, "check_gh_auth", lambda: _Check("auth", True, "ok"))
@@ -577,6 +584,7 @@ def test_handle_doctor_success_and_failure(monkeypatch):
     monkeypatch.setattr(cli, "resolve_model_token_limits", lambda _model: (123, 45))
     assert cli.handle_doctor(st) == 0
 
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: [])
     monkeypatch.setattr(cli, "check_gh_installed", lambda: _Check("gh", False, "bad"))
     monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: None)
     monkeypatch.setattr(cli, "load_cached_models", lambda: ([], None))
@@ -594,7 +602,10 @@ def test_handle_tui_paths(monkeypatch):
     monkeypatch.setattr(cli, "run_tui", lambda *a: None)
     assert cli.handle_tui(st) == 0
 
-    monkeypatch.setattr(cli, "run_tui", lambda *a: ("x/y", "openai", "provider", ["x/y"]))
+    monkeypatch.setattr(
+        cli, "run_tui",
+        lambda *a: ("x/y", "openai", "provider", ["x/y"], "copilot"),
+    )
     saved = {"called": False}
     monkeypatch.setattr(
         cli,
@@ -607,6 +618,7 @@ def test_handle_tui_paths(monkeypatch):
     assert st.provider_lock == "openai"
     assert st.route_mode == "provider"
     assert st.favorite_models == ["x/y"]
+    assert st.harness == "copilot"
     assert saved["called"] is True
 
     seen = {"args": None}
@@ -646,7 +658,10 @@ def test_handle_config(monkeypatch):
 
 
 def test_launch_copilot_paths(monkeypatch):
-    st = CarState(selected_model="m", provider_lock="aws", provider_lock_mode="prefer", route_mode="provider")
+    st = CarState(
+        selected_model="m", provider_lock="aws",
+        provider_lock_mode="prefer", route_mode="provider",
+    )
     monkeypatch.setattr(cli, "load_state", lambda: st)
 
     c = _Console()
@@ -658,18 +673,20 @@ def test_launch_copilot_paths(monkeypatch):
     monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "token")
     monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
     monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
-    monkeypatch.setattr(cli, "copilot_env", lambda *a: {})
-    monkeypatch.setattr(cli, "resolve_model_token_limits", lambda _model: (1234, 456))
+    monkeypatch.setattr(cli, "build_harness_env", lambda *a: {})
+    monkeypatch.setattr(
+        cli, "resolve_model_token_limits", lambda _model: (1234, 456),
+    )
 
     seen = {"args": None, "env": None}
 
-    def fake_exec(args, env, backend=None):
+    def fake_exec(harness, args, env, backend=None):
         seen["args"] = args
         seen["env"] = env
         seen["backend"] = backend
         return 0
 
-    monkeypatch.setattr(cli, "exec_copilot", fake_exec)
+    monkeypatch.setattr(cli, "exec_harness", fake_exec)
     assert cli.launch_copilot(["suggest"]) == 0
     assert seen["args"] == ["suggest"]
     assert seen["env"]["CAR_PROVIDER_LOCK"] == "aws"
@@ -691,15 +708,42 @@ def test_launch_copilot_missing_key_prints_helper(monkeypatch):
     assert any("Run: car key --set" in str(args[0]) for args, _ in c.messages)
 
 
+def test_launch_harness_claude_skips_token_limit_env(monkeypatch):
+    st = CarState(selected_model="m", provider_lock=None, harness="claude")
+    monkeypatch.setattr(cli, "load_state", lambda: st)
+    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "token")
+    monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
+    monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
+    monkeypatch.setattr(cli, "build_harness_env", lambda *a: {})
+    monkeypatch.setattr(
+        cli, "resolve_model_token_limits", lambda _model: (9999, 1234),
+    )
+
+    seen = {"env": None}
+
+    def fake_exec(harness, args, env, backend=None):
+        seen["env"] = env
+        return 0
+
+    monkeypatch.setattr(cli, "exec_harness", fake_exec)
+    assert cli.launch_harness([]) == 0
+    assert "COPILOT_PROVIDER_MAX_PROMPT_TOKENS" not in seen["env"]
+    assert "COPILOT_PROVIDER_MAX_OUTPUT_TOKENS" not in seen["env"]
+
+
 def test_launch_copilot_no_provider_lock(monkeypatch):
     st = CarState(selected_model="m", provider_lock=None)
     monkeypatch.setattr(cli, "load_state", lambda: st)
     monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "token")
     monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
     monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
-    monkeypatch.setattr(cli, "copilot_env", lambda *a: {})
+    monkeypatch.setattr(cli, "build_harness_env", lambda *a: {})
     monkeypatch.setattr(cli, "resolve_model_token_limits", lambda _model: (None, None))
-    monkeypatch.setattr(cli, "exec_copilot", lambda args, env, backend=None: 3)
+    monkeypatch.setattr(
+        cli, "exec_harness",
+        lambda h, a, e, backend=None: 3,
+
+    )
 
     assert cli.launch_copilot([]) == 3
 
@@ -710,16 +754,16 @@ def test_launch_copilot_passes_backend(monkeypatch):
     monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "token")
     monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
     monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
-    monkeypatch.setattr(cli, "copilot_env", lambda *a: {})
+    monkeypatch.setattr(cli, "build_harness_env", lambda *a: {})
     monkeypatch.setattr(cli, "resolve_model_token_limits", lambda _model: (None, None))
 
     seen = {"backend": None}
 
-    def fake_exec(_args, _env, backend=None):
+    def fake_exec(harness, args, env, backend=None):
         seen["backend"] = backend
         return 0
 
-    monkeypatch.setattr(cli, "exec_copilot", fake_exec)
+    monkeypatch.setattr(cli, "exec_harness", fake_exec)
     assert cli.launch_copilot([], backend="gh") == 0
     assert seen["backend"] == "gh"
 
@@ -930,3 +974,187 @@ def test_resolve_model_token_limits_ambiguous_short_id(monkeypatch):
     monkeypatch.setattr(cli, "load_cached_models", lambda: (rows, "now"))
 
     assert cli.resolve_model_token_limits("same") == (None, None)
+
+
+# ── Harness subcommand tests ─────────────────────────────────────────────────
+
+
+def test_build_parser_parses_harness_list():
+    parser = cli.build_parser()
+    ns = parser.parse_args(["harness", "list"])
+    assert ns.command == "harness"
+    assert ns.action == "list"
+
+
+def test_build_parser_parses_harness_use():
+    parser = cli.build_parser()
+    ns = parser.parse_args(["harness", "use", "claude"])
+    assert ns.command == "harness"
+    assert ns.action == "use"
+    assert ns.name == "claude"
+
+
+def test_build_parser_harness_use_invalid_choice():
+    parser = cli.build_parser()
+    import pytest
+    with pytest.raises(SystemExit):
+        parser.parse_args(["harness", "use", "invalid"])
+
+
+def test_main_routes_harness_subcommand(monkeypatch):
+    monkeypatch.setattr(
+        cli, "dispatch_subcommand", lambda args: 8,
+    )
+    assert cli.main(["harness", "list"]) == 8
+
+
+def test_dispatch_harness(monkeypatch):
+    st = CarState()
+    monkeypatch.setattr(cli, "load_state", lambda: st)
+    monkeypatch.setattr(cli, "handle_harness", lambda state, args: 5)
+    assert cli.dispatch_subcommand(_args(command="harness")) == 5
+
+
+def test_handle_harness_list_empty(monkeypatch):
+    st = CarState()
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: [])
+    assert cli.handle_harness(st, _args(action="list")) == 1
+
+
+def test_handle_harness_list_with_available(monkeypatch):
+    st = CarState(harness="copilot")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses",
+        lambda: ["copilot", "claude"],
+    )
+    assert cli.handle_harness(st, _args(action="ls")) == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "copilot" in text_blob
+    assert "claude" in text_blob
+
+
+def test_handle_harness_use_success(monkeypatch):
+    st = CarState(harness="copilot")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses",
+        lambda: ["copilot", "claude"],
+    )
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+    assert cli.handle_harness(st, _args(action="use", name="claude")) == 0
+    assert st.harness == "claude"
+
+
+def test_handle_harness_use_not_installed(monkeypatch):
+    st = CarState(harness="copilot")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: ["copilot"])
+    assert cli.handle_harness(st, _args(action="use", name="claude")) == 1
+
+
+def test_handle_harness_current(monkeypatch):
+    st = CarState(harness="claude")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses",
+        lambda: ["copilot", "claude"],
+    )
+    assert cli.handle_harness(st, _args(action="current")) == 0
+
+
+def test_handle_harness_unknown(monkeypatch):
+    st = CarState()
+    assert cli.handle_harness(st, _args(action="unknown")) == 1
+
+
+def test_handle_harness_pick_empty(monkeypatch):
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: [])
+    assert cli.handle_harness_pick() == 1
+
+
+def test_handle_harness_pick_single(monkeypatch):
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot"],
+    )
+    monkeypatch.setattr(cli, "load_state", lambda: CarState())
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+    assert cli.handle_harness_pick() == 0
+
+
+def test_handle_harness_set_and_launch(monkeypatch):
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "load_state", lambda: CarState())
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+
+    assert cli.handle_harness_set_and_launch("invalid", []) == 1
+    assert cli.handle_harness_set_and_launch("claude", []) == 0
+
+    monkeypatch.setattr(
+        cli, "launch_harness", lambda args: 42,
+    )
+    assert cli.handle_harness_set_and_launch("claude", ["chat"]) == 42
+
+
+def test_handle_env_shows_harness_info(monkeypatch):
+    st = CarState(harness="claude", selected_model="a/b")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "token")
+    assert cli.handle_env(st) == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "CAR_HARNESS=claude" in text_blob
+    assert "ANTHROPIC_BASE_URL" in text_blob
+    assert "ANTHROPIC_API_KEY=<set>" in text_blob
+
+
+def test_handle_env_copilot_shows_copilot_vars(monkeypatch):
+    st = CarState(harness="copilot", selected_model="a/b")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: None)
+    assert cli.handle_env(st) == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "CAR_HARNESS=copilot" in text_blob
+    assert "COPILOT_PROVIDER_BASE_URL" in text_blob
+    assert "COPILOT_PROVIDER_API_KEY=<unset>" in text_blob
+
+
+def test_handle_doctor_claude_harness(monkeypatch):
+    st = CarState(harness="claude")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["claude"],
+    )
+    monkeypatch.setattr(
+        cli, "check_claude_installed",
+        lambda: _Check("claude", True, "ok"),
+    )
+    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "k")
+    monkeypatch.setattr(cli, "load_cached_models", lambda: ([1], "now"))
+    monkeypatch.setattr(
+        cli, "resolve_model_token_limits", lambda _model: (123, 45),
+    )
+    assert cli.handle_doctor(st) == 0
+
+
+def test_main_harness_flag_no_arg(monkeypatch):
+    monkeypatch.setattr(cli, "handle_harness_pick", lambda: 5)
+    assert cli.main(["--harness"]) == 5
+
+
+def test_main_harness_flag_with_name(monkeypatch):
+    monkeypatch.setattr(cli, "handle_harness_set_and_launch", lambda n, r: 6)
+    assert cli.main(["--harness", "claude"]) == 6
