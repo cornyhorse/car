@@ -257,6 +257,15 @@ CAR_TOOLS_VENV="${CAR_TOOLS_VENV:-$HOME/.local/share/car/venv-tools}"
 CAR_MATTSTASH_CLI="${CAR_MATTSTASH_CLI:-$CAR_TOOLS_VENV/bin/mattstash}"
 CAR_MATTSTASH_KEY_NAME="${CAR_MATTSTASH_KEY_NAME:-openrouter_api_key}"
 
+cleanup_terminal() {
+  # Restore terminal state when interactive harnesses exit or are interrupted.
+  stty sane 2>/dev/null || true
+  tput sgr0 2>/dev/null || true
+  tput cnorm 2>/dev/null || true
+  tput rmcup 2>/dev/null || true
+}
+trap cleanup_terminal EXIT INT TERM
+
 if [ -z "${CAR_OPENROUTER_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [ -z "${COPILOT_PROVIDER_API_KEY:-}" ]; then
   if [ -x "$CAR_MATTSTASH_CLI" ]; then
     token="$($CAR_MATTSTASH_CLI get "$CAR_MATTSTASH_KEY_NAME" --show-password --json 2>/dev/null | sed -nE 's/^[[:space:]]*"value":[[:space:]]*"(.*)"[[:space:]]*,?$/\1/p' | head -n 1)"
@@ -274,16 +283,10 @@ fi
 if docker compose version >/dev/null 2>&1; then
   docker compose -f "$CAR_HOME/docker-compose.yml" run --rm --user "$(id -u):$(id -g)" car "$@"
   rc=$?
-  # Restore terminal state after interactive harnesses (Claude/Copilot TUIs).
-  stty sane 2>/dev/null || true
-  tput cnorm 2>/dev/null || true
   exit "$rc"
 elif command -v docker-compose >/dev/null 2>&1; then
   docker-compose -f "$CAR_HOME/docker-compose.yml" run --rm --user "$(id -u):$(id -g)" car "$@"
   rc=$?
-  # Restore terminal state after interactive harnesses (Claude/Copilot TUIs).
-  stty sane 2>/dev/null || true
-  tput cnorm 2>/dev/null || true
   exit "$rc"
 else
   echo "Docker Compose is required but was not found." >&2
@@ -304,6 +307,15 @@ CAR_TOOLS_VENV="${CAR_TOOLS_VENV:-$HOME/.local/share/car/venv-tools}"
 CAR_TOOLS_CAR="${CAR_TOOLS_CAR:-$CAR_TOOLS_VENV/bin/car}"
 CAR_MATTSTASH_CLI="${CAR_MATTSTASH_CLI:-$CAR_TOOLS_VENV/bin/mattstash}"
 CAR_MATTSTASH_KEY_NAME="${CAR_MATTSTASH_KEY_NAME:-openrouter_api_key}"
+
+cleanup_terminal() {
+  # Restore terminal state when interactive harnesses exit or are interrupted.
+  stty sane 2>/dev/null || true
+  tput sgr0 2>/dev/null || true
+  tput cnorm 2>/dev/null || true
+  tput rmcup 2>/dev/null || true
+}
+trap cleanup_terminal EXIT INT TERM
 
 export PATH="$CAR_TOOLS_VENV/bin:$PATH"
 
@@ -328,9 +340,6 @@ fi
 
 "$CAR_TOOLS_CAR" "$@"
 rc=$?
-# Restore terminal state after interactive harnesses (Claude/Copilot TUIs).
-stty sane 2>/dev/null || true
-tput cnorm 2>/dev/null || true
 exit "$rc"
 EOF
   chmod +x "$CAR_WRAPPER"
