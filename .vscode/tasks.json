@@ -1,0 +1,11 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run harness tests",
+			"type": "shell",
+			"command": "python -m pytest tests/test_harness.py -v",
+			"isBackground": false
+		}
+	]
+}

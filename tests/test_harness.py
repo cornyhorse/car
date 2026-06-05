@@ -131,36 +131,35 @@ def test_claude_env(monkeypatch):
 
 
 def test_exec_copilot_paths(monkeypatch):
-    seen = {"cmd": None}
-    ok = subprocess.CompletedProcess(args=["gh"], returncode=7)
+    seen: dict[str, list[str]] = {"cmd": []}
 
-    def fake_run(cmd, **kwargs):
-        seen["cmd"] = cmd
-        return ok
+    def fake_execvpe(file, args, env):
+        seen["cmd"] = list(args)
+        return None  # execvpe does not return
 
-    monkeypatch.setattr(harness.subprocess, "run", fake_run)
+    monkeypatch.setattr(harness.os, "execvpe", fake_execvpe)
 
     # Prefer standalone copilot
     monkeypatch.setattr(
         harness.shutil, "which",
         lambda name: "/usr/bin/copilot" if name == "copilot" else None,
     )
-    assert harness.exec_copilot(["suggest"], {"A": "1"}) == 7
+    harness.exec_copilot(["suggest"], {"A": "1"})
     assert seen["cmd"][0] == "copilot"
 
     # Fall back to gh copilot
     monkeypatch.setattr(harness.shutil, "which", lambda _: None)
-    assert harness.exec_copilot(["suggest"], {"A": "1"}) == 7
+    harness.exec_copilot(["suggest"], {"A": "1"})
     assert seen["cmd"][:2] == ["gh", "copilot"]
 
     # Explicit backend gh
-    assert harness.exec_copilot(["suggest"], {"A": "1"}, backend="gh") == 7
+    harness.exec_copilot(["suggest"], {"A": "1"}, backend="gh")
     assert seen["cmd"][:2] == ["gh", "copilot"]
 
     # Explicit backend copilot
-    assert harness.exec_copilot(
+    harness.exec_copilot(
         ["suggest"], {"A": "1"}, backend="copilot",
-    ) == 7
+    )
     assert seen["cmd"][0] == "copilot"
 
 
@@ -168,29 +167,36 @@ def test_exec_copilot_file_not_found(monkeypatch):
     def boom(*args, **kwargs):
         raise FileNotFoundError
 
-    monkeypatch.setattr(harness.subprocess, "run", boom)
+    monkeypatch.setattr(harness.os, "execvpe", boom)
     monkeypatch.setattr(harness.shutil, "which", lambda _: None)
     assert harness.exec_copilot(["suggest"], {}) == 1
 
 
 def test_exec_claude(monkeypatch):
-    seen = {"cmd": None}
-    ok = subprocess.CompletedProcess(args=["claude"], returncode=3)
+    seen: dict[str, list[str]] = {"cmd": []}
 
-    def fake_run(cmd, **kwargs):
-        seen["cmd"] = cmd
-        return ok
+    def fake_execvpe(file, args, env):
+        seen["cmd"] = list(args)
+        return None
 
-    monkeypatch.setattr(harness.subprocess, "run", fake_run)
-    assert harness.exec_claude(["chat"], {"A": "1"}) == 3
-    assert seen["cmd"][0] == "claude"
+    monkeypatch.setattr(harness.os, "execvpe", fake_execvpe)
+    harness.exec_claude(["chat"], {"A": "1"})
+    assert seen["cmd"] == ["claude", "chat"]
 
 
 def test_exec_claude_file_not_found(monkeypatch):
     def boom(*args, **kwargs):
         raise FileNotFoundError
 
-    monkeypatch.setattr(harness.subprocess, "run", boom)
+    monkeypatch.setattr(harness.os, "execvpe", boom)
+    assert harness.exec_claude([], {}) == 1
+
+
+def test_exec_claude_oserror(monkeypatch):
+    def boom(*args, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(harness.os, "execvpe", boom)
     assert harness.exec_claude([], {}) == 1
 
 

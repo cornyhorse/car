@@ -277,9 +277,19 @@ if [ -z "${CAR_OPENROUTER_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ] && [
 fi
 
 if docker compose version >/dev/null 2>&1; then
-  exec docker compose -f "$CAR_HOME/docker-compose.yml" run --rm --user "$(id -u):$(id -g)" car "$@"
+  docker compose -f "$CAR_HOME/docker-compose.yml" run --rm --user "$(id -u):$(id -g)" car "$@"
+  rc=$?
+  # Restore terminal state after interactive harnesses (Claude/Copilot TUIs).
+  stty sane 2>/dev/null || true
+  tput cnorm 2>/dev/null || true
+  exit "$rc"
 elif command -v docker-compose >/dev/null 2>&1; then
-  exec docker-compose -f "$CAR_HOME/docker-compose.yml" run --rm --user "$(id -u):$(id -g)" car "$@"
+  docker-compose -f "$CAR_HOME/docker-compose.yml" run --rm --user "$(id -u):$(id -g)" car "$@"
+  rc=$?
+  # Restore terminal state after interactive harnesses (Claude/Copilot TUIs).
+  stty sane 2>/dev/null || true
+  tput cnorm 2>/dev/null || true
+  exit "$rc"
 else
   echo "Docker Compose is required but was not found." >&2
   exit 1
@@ -326,7 +336,12 @@ if [ ! -x "$CAR_TOOLS_CAR" ]; then
   exit 1
 fi
 
-exec "$CAR_TOOLS_CAR" "$@"
+"$CAR_TOOLS_CAR" "$@"
+rc=$?
+# Restore terminal state after interactive harnesses (Claude/Copilot TUIs).
+stty sane 2>/dev/null || true
+tput cnorm 2>/dev/null || true
+exit "$rc"
 EOF
   chmod +x "$CAR_WRAPPER"
 }

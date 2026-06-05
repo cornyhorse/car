@@ -82,26 +82,38 @@ def copilot_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
     return env
 
 
+def _copilot_cmd(backend: str | None = None) -> list[str]:
+    """Return the copilot command list without args (for resolution)."""
+    if backend == "gh":
+        return ["gh", "copilot"]
+    if backend == "copilot":
+        return ["copilot"]
+    if shutil.which("copilot"):
+        return ["copilot"]
+    return ["gh", "copilot"]
+
+
 def exec_copilot(
     args: list[str],
     env: dict[str, str],
     backend: str | None = None,
 ) -> int:
-    if backend == "gh":
-        cmd = ["gh", "copilot", *args]
-    elif backend == "copilot":
-        cmd = ["copilot", *args]
-    elif shutil.which("copilot"):
-        cmd = ["copilot", *args]
-    else:
-        cmd = ["gh", "copilot", *args]
+    """Replace the current process with Copilot CLI.
 
+    Uses os.execvpe to give the harness full terminal control (raw mode,
+    alternate screen buffer, cursor handling). This function never returns
+    on success — the Python process is replaced entirely.
+    """
+    cmd = [*_copilot_cmd(backend), *args]
     try:
-        result = subprocess.run(cmd, env=env, check=False)
+        os.execvpe(cmd[0], cmd, env)
     except FileNotFoundError:
         print("Copilot executable was not found.")
         return 1
-    return result.returncode
+    except OSError as exc:
+        print(f"Copilot executable failed to start: {exc}")
+        return 1
+    return 1
 
 
 # ── Claude Code harness ──────────────────────────────────────────────────────
@@ -132,13 +144,22 @@ def exec_claude(
     args: list[str],
     env: dict[str, str],
 ) -> int:
+    """Replace the current process with Claude Code CLI.
+
+    Uses os.execvpe to give the harness full terminal control (raw mode,
+    alternate screen buffer, cursor handling). This function never returns
+    on success — the Python process is replaced entirely.
+    """
     cmd = ["claude", *args]
     try:
-        result = subprocess.run(cmd, env=env, check=False)
+        os.execvpe(cmd[0], cmd, env)
     except FileNotFoundError:
         print("Claude Code executable was not found.")
         return 1
-    return result.returncode
+    except OSError as exc:
+        print(f"Claude Code executable failed to start: {exc}")
+        return 1
+    return 1
 
 
 # ── Harness detection & dispatch ─────────────────────────────────────────────
