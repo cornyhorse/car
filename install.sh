@@ -38,6 +38,39 @@ require_cmd() {
   fi
 }
 
+check_python_venv_available() {
+  if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+    _py_ver="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    printf '[car-install] python3-venv package is required but not installed.\n' >&2
+    printf '[car-install] On Debian/Ubuntu, install it with:\n' >&2
+    printf '[car-install]   sudo apt install python%s-venv\n' "$_py_ver" >&2
+    printf '[car-install] Then re-run this installer.\n' >&2
+    exit 1
+  fi
+}
+
+check_docker_running() {
+  if ! docker info >/dev/null 2>&1; then
+    printf '[car-install] Docker daemon is not running or you lack permission.\n' >&2
+    printf '[car-install] Start Docker Desktop, or ensure the dockerd service is running.\n' >&2
+    printf '[car-install] You may also need to add yourself to the "docker" group:\n' >&2
+    printf '[car-install]   sudo usermod -aG docker $USER && newgrp docker\n' >&2
+    exit 1
+  fi
+}
+
+check_docker_compose_available() {
+  if docker compose version >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    return 0
+  fi
+  printf '[car-install] Docker Compose is required but was not found.\n' >&2
+  printf '[car-install] Install Docker Compose or upgrade to a Docker version that bundles it.\n' >&2
+  exit 1
+}
+
 usage() {
   cat <<EOF
 Usage: install.sh [options]
@@ -265,14 +298,30 @@ clone_or_update_repo() {
   local repo_url="https://github.com/${CAR_GITHUB_REPO}.git"
 
   if [ -d "$CAR_HOME/.git" ]; then
-    log "Updating existing checkout at $CAR_HOME"
-    git -C "$CAR_HOME" fetch --depth 1 origin "$CAR_GIT_REF"
-    git -C "$CAR_HOME" checkout "$CAR_GIT_REF"
-    git -C "$CAR_HOME" reset --hard "origin/$CAR_GIT_REF"
-  else
-    log "Cloning $repo_url into $CAR_HOME"
-    mkdir -p "$(dirname "$CAR_HOME")"
-    git clone --depth 1 --branch "$CAR_GIT_REF" "$repo_url" "$CAR_HOME"
+    if ! git -C "$CAR_HOME" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      warn "Existing checkout at $CAR_HOME is corrupted; removing"
+      rm -rf "$CAR_HOME"
+    else
+      log "Updating existing checkout at $CAR_HOME"
+      git -C "$CAR_HOME" fetch --depth 1 origin "$CAR_GIT_REF"
+      git -C "$CAR_HOME" checkout "$CAR_GIT_REF"
+      git -C "$CAR_HOME" reset --hard "origin/$CAR_GIT_REF"
+      return
+    fi
+  fi
+
+  # Validate the ref exists before creating any directories (checks branches and tags)
+  if ! git ls-remote "$repo_url" "refs/heads/$CAR_GIT_REF" "refs/tags/$CAR_GIT_REF" 2>/dev/null | grep -q .; then
+    printf '[car-install] Git ref "%s" not found in %s\n' "$CAR_GIT_REF" "$CAR_GITHUB_REPO" >&2
+    exit 1
+  fi
+
+  log "Cloning $repo_url into $CAR_HOME"
+  mkdir -p "$(dirname "$CAR_HOME")"
+  if ! git clone --depth 1 --branch "$CAR_GIT_REF" "$repo_url" "$CAR_HOME"; then
+    warn "git clone failed; cleaning up partial checkout"
+    rm -rf "$CAR_HOME"
+    exit 1
   fi
 }
 
@@ -290,27 +339,74 @@ build_container() {
 
   log "Building car container image"
   if docker compose version >/dev/null 2>&1; then
-    docker compose -f "$CAR_HOME/docker-compose.yml" build car
+    docker compose -f "$CAR_HOME/docker-compose.yml" build car || exit 1
   elif command -v docker-compose >/dev/null 2>&1; then
-    docker-compose -f "$CAR_HOME/docker-compose.yml" build car
-  else
-    echo "Docker Compose is required but was not found." >&2
+    docker-compose -f "$CAR_HOME/docker-compose.yml" build car || exit 1
+  fi
+
+  # Verify the image actually exists before writing the marker
+  if ! docker image inspect "$CAR_DOCKER_IMAGE" >/dev/null 2>&1; then
+    warn "Docker image $CAR_DOCKER_IMAGE was not found after build"
     exit 1
   fi
 
   printf '%s' "$current_ref" >"$marker_file"
+  log "Container build complete"
+}
+
+venv_is_healthy() {
+  [ -x "$CAR_TOOLS_PYTHON" ] || return 1
+  [ -x "$CAR_TOOLS_PIP" ] || return 1
+  "$CAR_TOOLS_PIP" --version >/dev/null 2>&1 || return 1
+  return 0
+}
+
+recover_broken_venv() {
+  warn "Tools venv at $CAR_TOOLS_VENV exists but is incomplete or broken"
+
+  if can_prompt; then
+    if ! prompt_yes_no "Remove broken venv and recreate?" "y"; then
+      printf '[car-install] Cannot continue without a working tools venv. Please fix manually.\n' >&2
+      exit 1
+    fi
+  else
+    log "Non-interactive mode: auto-removing broken venv"
+  fi
+
+  # Safety guard against accidentally nuking a non-venv directory
+  if [ -z "$CAR_TOOLS_VENV" ] || [ "$CAR_TOOLS_VENV" = "/" ] || [ "$CAR_TOOLS_VENV" = "$HOME" ]; then
+    printf '[car-install] Refusing to remove unsafe venv path: %s\n' "$CAR_TOOLS_VENV" >&2
+    exit 1
+  fi
+
+  rm -rf "$CAR_TOOLS_VENV"
+  log "Recreating tools venv at $CAR_TOOLS_VENV"
+  python3 -m venv "$CAR_TOOLS_VENV"
+
+  if ! venv_is_healthy; then
+    printf '[car-install] Failed to create a working tools venv at %s\n' "$CAR_TOOLS_VENV" >&2
+    exit 1
+  fi
+  log "Tools venv created successfully"
 }
 
 create_or_reuse_tools_venv() {
-  require_cmd python3
-
-  if [ -x "$CAR_TOOLS_PYTHON" ]; then
-    log "Using existing tools venv at $CAR_TOOLS_VENV"
+  if [ -d "$CAR_TOOLS_VENV" ]; then
+    if venv_is_healthy; then
+      log "Using existing tools venv at $CAR_TOOLS_VENV"
+      return
+    fi
+    recover_broken_venv
     return
   fi
 
   log "Creating tools venv at $CAR_TOOLS_VENV"
   python3 -m venv "$CAR_TOOLS_VENV"
+
+  if ! venv_is_healthy; then
+    printf '[car-install] Failed to create a working tools venv at %s\n' "$CAR_TOOLS_VENV" >&2
+    exit 1
+  fi
 }
 
 ensure_python_package_in_tools_venv() {
@@ -346,8 +442,18 @@ ensure_host_tools() {
   create_or_reuse_tools_venv
   ensure_python_package_in_tools_venv "$CAR_MATTSTASH_PACKAGE" mattstash
 
+  # Verify mattstash CLI is present and executable after install
+  if [ ! -x "$CAR_MATTSTASH_CLI" ]; then
+    warn "mattstash CLI not found at $CAR_MATTSTASH_CLI"
+    warn "Key storage and retrieval may not work until this is fixed"
+  fi
+
   if [ "$CAR_INSTALL_MODE" = "venv" ]; then
     ensure_car_host_cli_installed
+    if [ ! -x "$CAR_TOOLS_CAR" ]; then
+      printf '[car-install] car host CLI not found at %s after install\n' "$CAR_TOOLS_CAR" >&2
+      exit 1
+    fi
   fi
 }
 
@@ -364,9 +470,6 @@ ensure_gh_copilot_installed() {
     log "Detected GitHub CLI with Copilot extension"
     return
   fi
-
-  require_cmd curl
-  require_cmd bash
 
   log "Installing GitHub Copilot CLI via $CAR_COPILOT_INSTALL_URL"
   curl -fsSL "$CAR_COPILOT_INSTALL_URL" | bash
@@ -590,11 +693,17 @@ warm_model_cache() {
 main() {
   parse_args "$@"
   require_cmd git
+  require_cmd curl
 
   choose_install_mode
 
   if [ "$CAR_INSTALL_MODE" = "docker" ]; then
     require_cmd docker
+    check_docker_running
+    check_docker_compose_available
+  else
+    require_cmd python3
+    check_python_venv_available
   fi
 
   ensure_gh_copilot_installed
