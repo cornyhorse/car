@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import difflib
 import getpass
+import subprocess
 import sys
+from pathlib import Path
 from textwrap import dedent
 
 from rich.console import Console
@@ -178,6 +180,9 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     parser = build_parser()
 
+    if argv and argv[0] == "--update":
+        return handle_update()
+
     if argv and argv[0] == "--cli":
         return launch_copilot(argv[1:], backend="gh")
 
@@ -218,6 +223,47 @@ def main(argv: list[str] | None = None) -> int:
         return dispatch_subcommand(args)
 
     return launch_harness(argv)
+
+
+def _repo_root_for_update() -> Path | None:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / ".git").exists() and (parent / "install.sh").exists():
+            return parent
+    return None
+
+
+def handle_update() -> int:
+    repo_root = _repo_root_for_update()
+    if repo_root is None:
+        console.print(
+            "Update unavailable: no git checkout found for this install.",
+            style="red",
+        )
+        console.print(
+            "Use the installed wrapper command `car --update` instead.",
+        )
+        return 1
+
+    console.print(f"Updating car from: {repo_root}")
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "pull", "--ff-only"],
+            check=False,
+        )
+    except FileNotFoundError:
+        console.print("git not found in PATH", style="red")
+        return 1
+
+    if result.returncode != 0:
+        console.print(
+            "Update failed (git pull returned non-zero)",
+            style="red",
+        )
+        return result.returncode or 1
+
+    console.print("Update complete.")
+    return 0
 
 
 def dispatch_subcommand(args: argparse.Namespace) -> int:

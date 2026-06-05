@@ -90,6 +90,11 @@ def test_main_routes_cli_flag_to_gh_backend(monkeypatch):
     assert received["backend"] == "gh"
 
 
+def test_main_routes_update_flag(monkeypatch):
+    monkeypatch.setattr(cli, "handle_update", lambda: 77)
+    assert cli.main(["--update"]) == 77
+
+
 def test_main_routes_help_to_local_parser(monkeypatch):
     seen = {"help": 0, "launch": 0}
 
@@ -107,6 +112,67 @@ def test_main_routes_help_to_local_parser(monkeypatch):
     assert cli.main(["--help"]) == 0
     assert seen["help"] == 1
     assert seen["launch"] == 0
+
+
+def test_handle_update_no_repo(monkeypatch):
+    monkeypatch.setattr(cli, "_repo_root_for_update", lambda: None)
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    assert cli.handle_update() == 1
+    assert any("Update unavailable" in str(args[0]) for args, _ in c.messages)
+
+
+def test_handle_update_git_missing(monkeypatch):
+    monkeypatch.setattr(
+        cli, "_repo_root_for_update", lambda: cli.Path("/tmp/car"),
+    )
+
+    def boom(*args, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(cli.subprocess, "run", boom)
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    assert cli.handle_update() == 1
+    assert any("git not found" in str(args[0]) for args, _ in c.messages)
+
+
+def test_handle_update_pull_failure(monkeypatch):
+    monkeypatch.setattr(
+        cli, "_repo_root_for_update", lambda: cli.Path("/tmp/car"),
+    )
+
+    class _Result:
+        returncode = 2
+
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: _Result())
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    assert cli.handle_update() == 2
+    assert any("Update failed" in str(args[0]) for args, _ in c.messages)
+
+
+def test_handle_update_pull_success(monkeypatch):
+    monkeypatch.setattr(
+        cli, "_repo_root_for_update", lambda: cli.Path("/tmp/car"),
+    )
+
+    class _Result:
+        returncode = 0
+
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: _Result())
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    assert cli.handle_update() == 0
+    assert any("Update complete" in str(args[0]) for args, _ in c.messages)
 
 
 def test_main_routes_help_alias_to_local_parser(monkeypatch):
