@@ -173,22 +173,30 @@ def test_exec_copilot_file_not_found(monkeypatch):
 
 
 def test_exec_claude(monkeypatch):
-    seen: dict[str, list[str]] = {"cmd": []}
+    seen = {"cmd": None, "cleaned": False}
+    ok = subprocess.CompletedProcess(args=["claude"], returncode=3)
 
-    def fake_execvpe(file, args, env):
-        seen["cmd"] = list(args)
-        return None
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return ok
 
-    monkeypatch.setattr(harness.os, "execvpe", fake_execvpe)
-    harness.exec_claude(["chat"], {"A": "1"})
+    monkeypatch.setattr(harness.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        harness,
+        "_restore_terminal_state",
+        lambda: seen.update({"cleaned": True}),
+    )
+
+    assert harness.exec_claude(["chat"], {"A": "1"}) == 3
     assert seen["cmd"] == ["claude", "chat"]
+    assert seen["cleaned"] is True
 
 
 def test_exec_claude_file_not_found(monkeypatch):
     def boom(*args, **kwargs):
         raise FileNotFoundError
 
-    monkeypatch.setattr(harness.os, "execvpe", boom)
+    monkeypatch.setattr(harness.subprocess, "run", boom)
     assert harness.exec_claude([], {}) == 1
 
 
@@ -196,8 +204,16 @@ def test_exec_claude_oserror(monkeypatch):
     def boom(*args, **kwargs):
         raise OSError("permission denied")
 
-    monkeypatch.setattr(harness.os, "execvpe", boom)
+    monkeypatch.setattr(harness.subprocess, "run", boom)
     assert harness.exec_claude([], {}) == 1
+
+
+def test_exec_claude_keyboard_interrupt(monkeypatch):
+    def boom(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(harness.subprocess, "run", boom)
+    assert harness.exec_claude([], {}) == 130
 
 
 def test_detect_available_harnesses_both(monkeypatch):

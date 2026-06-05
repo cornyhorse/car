@@ -140,26 +140,44 @@ def claude_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
     return env
 
 
+def _restore_terminal_state() -> None:
+    # Best-effort cleanup after interactive TUI sessions.
+    for cmd in (
+        ["stty", "sane"],
+        ["tput", "sgr0"],
+        ["tput", "cnorm"],
+        ["tput", "rmcup"],
+    ):
+        try:
+            subprocess.run(
+                cmd,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            continue
+
+
 def exec_claude(
     args: list[str],
     env: dict[str, str],
 ) -> int:
-    """Replace the current process with Claude Code CLI.
-
-    Uses os.execvpe to give the harness full terminal control (raw mode,
-    alternate screen buffer, cursor handling). This function never returns
-    on success — the Python process is replaced entirely.
-    """
+    """Run Claude Code CLI and restore terminal state on exit."""
     cmd = ["claude", *args]
     try:
-        os.execvpe(cmd[0], cmd, env)
+        result = subprocess.run(cmd, env=env, check=False)
+        return result.returncode
     except FileNotFoundError:
         print("Claude Code executable was not found.")
         return 1
+    except KeyboardInterrupt:
+        return 130
     except OSError as exc:
         print(f"Claude Code executable failed to start: {exc}")
         return 1
-    return 1
+    finally:
+        _restore_terminal_state()
 
 
 # ── Harness detection & dispatch ─────────────────────────────────────────────
