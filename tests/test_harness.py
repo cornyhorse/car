@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 
 from car import harness
@@ -174,13 +175,12 @@ def test_exec_copilot_file_not_found(monkeypatch):
 
 def test_exec_claude(monkeypatch):
     seen = {"cmd": None, "cleaned": False}
-    ok = subprocess.CompletedProcess(args=["claude"], returncode=3)
 
-    def fake_run(cmd, **kwargs):
+    def fake_run_in_pty(cmd, env):
         seen["cmd"] = cmd
-        return ok
+        return 3
 
-    monkeypatch.setattr(harness.subprocess, "run", fake_run)
+    monkeypatch.setattr(harness, "_run_in_pty", fake_run_in_pty)
     monkeypatch.setattr(
         harness,
         "_restore_terminal_state",
@@ -196,7 +196,7 @@ def test_exec_claude_file_not_found(monkeypatch):
     def boom(*args, **kwargs):
         raise FileNotFoundError
 
-    monkeypatch.setattr(harness.subprocess, "run", boom)
+    monkeypatch.setattr(harness, "_run_in_pty", boom)
     assert harness.exec_claude([], {}) == 1
 
 
@@ -204,7 +204,7 @@ def test_exec_claude_oserror(monkeypatch):
     def boom(*args, **kwargs):
         raise OSError("permission denied")
 
-    monkeypatch.setattr(harness.subprocess, "run", boom)
+    monkeypatch.setattr(harness, "_run_in_pty", boom)
     assert harness.exec_claude([], {}) == 1
 
 
@@ -212,8 +212,25 @@ def test_exec_claude_keyboard_interrupt(monkeypatch):
     def boom(*args, **kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(harness.subprocess, "run", boom)
+    monkeypatch.setattr(harness, "_run_in_pty", boom)
     assert harness.exec_claude([], {}) == 130
+
+
+def test_run_in_pty(monkeypatch):
+    monkeypatch.setenv("SAVED", "1")
+    seen = {"cmd": None, "env_k": None}
+
+    def fake_spawn(cmd):
+        seen["cmd"] = cmd
+        seen["env_k"] = os.environ.get("K")
+        return 0
+
+    monkeypatch.setattr(harness.pty, "spawn", fake_spawn)
+    rc = harness._run_in_pty(["claude"], {"K": "V"})
+    assert rc == 0
+    assert seen["cmd"] == ["claude"]
+    assert seen["env_k"] == "V"
+    assert os.environ.get("SAVED") == "1"
 
 
 def test_detect_available_harnesses_both(monkeypatch):

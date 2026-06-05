@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import pty
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -159,15 +160,34 @@ def _restore_terminal_state() -> None:
             continue
 
 
+def _run_in_pty(cmd: list[str], env: dict[str, str]) -> int:
+    previous_env = os.environ.copy()
+    os.environ.clear()
+    os.environ.update(env)
+    try:
+        status = pty.spawn(cmd)
+    finally:
+        os.environ.clear()
+        os.environ.update(previous_env)
+
+    try:
+        return os.waitstatus_to_exitcode(status)
+    except AttributeError:
+        if os.WIFEXITED(status):
+            return os.WEXITSTATUS(status)
+        if os.WIFSIGNALED(status):
+            return 128 + os.WTERMSIG(status)
+        return 1
+
+
 def exec_claude(
     args: list[str],
     env: dict[str, str],
 ) -> int:
-    """Run Claude Code CLI and restore terminal state on exit."""
+    """Run Claude Code CLI in a fresh PTY and restore terminal state."""
     cmd = ["claude", *args]
     try:
-        result = subprocess.run(cmd, env=env, check=False)
-        return result.returncode
+        return _run_in_pty(cmd, env)
     except FileNotFoundError:
         print("Claude Code executable was not found.")
         return 1
