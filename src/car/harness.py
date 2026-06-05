@@ -4,6 +4,7 @@ import os
 import pty
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Literal
 
@@ -143,11 +144,17 @@ def claude_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
 
 def _restore_terminal_state() -> None:
     # Best-effort cleanup after interactive TUI sessions.
+    try:
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
     for cmd in (
         ["stty", "sane"],
         ["tput", "sgr0"],
         ["tput", "cnorm"],
-        ["tput", "rmcup"],
+        ["tput", "clear"],
     ):
         try:
             subprocess.run(

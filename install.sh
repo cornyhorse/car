@@ -259,10 +259,11 @@ CAR_MATTSTASH_KEY_NAME="${CAR_MATTSTASH_KEY_NAME:-openrouter_api_key}"
 
 cleanup_terminal() {
   # Restore terminal state when interactive harnesses exit or are interrupted.
+  printf '\r\033[K' 2>/dev/null || true
   stty sane 2>/dev/null || true
   tput sgr0 2>/dev/null || true
   tput cnorm 2>/dev/null || true
-  tput rmcup 2>/dev/null || true
+  tput clear 2>/dev/null || true
 }
 trap cleanup_terminal EXIT INT TERM
 
@@ -310,10 +311,11 @@ CAR_MATTSTASH_KEY_NAME="${CAR_MATTSTASH_KEY_NAME:-openrouter_api_key}"
 
 cleanup_terminal() {
   # Restore terminal state when interactive harnesses exit or are interrupted.
+  printf '\r\033[K' 2>/dev/null || true
   stty sane 2>/dev/null || true
   tput sgr0 2>/dev/null || true
   tput cnorm 2>/dev/null || true
-  tput rmcup 2>/dev/null || true
+  tput clear 2>/dev/null || true
 }
 trap cleanup_terminal EXIT INT TERM
 
