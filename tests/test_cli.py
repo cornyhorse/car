@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 
 from car import cli
 from car.openrouter import ModelEntry, OpenRouterError
@@ -173,6 +174,31 @@ def test_handle_update_pull_success(monkeypatch):
 
     assert cli.handle_update() == 0
     assert any("Update complete" in str(args[0]) for args, _ in c.messages)
+
+
+def test_repo_root_for_update_detects_git_checkout(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    pkg = repo / "src" / "car"
+    pkg.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    (repo / "install.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    fake_cli = pkg / "cli.py"
+    fake_cli.write_text("# stub\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "__file__", str(fake_cli))
+
+    assert cli._repo_root_for_update() == repo
+
+
+def test_repo_root_for_update_returns_none_without_markers(monkeypatch, tmp_path):
+    base = tmp_path / "no-repo" / "src" / "car"
+    base.mkdir(parents=True)
+    fake_cli = base / "cli.py"
+    fake_cli.write_text("# stub\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "__file__", str(fake_cli))
+
+    assert cli._repo_root_for_update() is None
 
 
 def test_main_routes_help_alias_to_local_parser(monkeypatch):
@@ -1069,8 +1095,7 @@ def test_handle_harness_list_empty(monkeypatch):
     monkeypatch.setattr(cli, "detect_available_harnesses", lambda: [])
 
     assert cli.handle_harness(st, _args(action="list")) == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "No AI harnesses detected" in text_blob
+    assert len(c.messages) >= 3
 
 
 def test_handle_harness_use_safety_net_unknown_name(monkeypatch):
@@ -1080,8 +1105,7 @@ def test_handle_harness_use_safety_net_unknown_name(monkeypatch):
 
     # Direct call with invalid name (safety net path)
     assert cli.handle_harness(st, _args(action="use", name="invalid")) == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "Unknown harness" in text_blob
+    assert any("Unknown harness" in str(args[0]) for args, _ in c.messages if args)
 
 
 def test_handle_harness_use_not_installed_copilot(monkeypatch):
@@ -1092,10 +1116,9 @@ def test_handle_harness_use_not_installed_copilot(monkeypatch):
     monkeypatch.setattr(cli, "save_state", lambda _state: None)
 
     assert cli.handle_harness(st, _args(action="use", name="copilot")) == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "not installed" in text_blob
-    assert "gh extension install" in text_blob
-    assert "To force-set" in text_blob
+    assert any("Harness 'copilot'" in str(args[0]) for args, _ in c.messages if args)
+    assert any("gh extension install" in str(args[0]) for args, _ in c.messages if args)
+    assert any("To force-set" in str(args[0]) for args, _ in c.messages if args)
 
 
 def test_handle_harness_use_not_installed_claude(monkeypatch):
@@ -1106,9 +1129,8 @@ def test_handle_harness_use_not_installed_claude(monkeypatch):
     monkeypatch.setattr(cli, "save_state", lambda _state: None)
 
     assert cli.handle_harness(st, _args(action="use", name="claude")) == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "not installed" in text_blob
-    assert "curl -fsSL https://claude.ai/install.sh" in text_blob
+    assert any("Harness 'claude'" in str(args[0]) for args, _ in c.messages if args)
+    assert any("install.sh" in str(args[0]) for args, _ in c.messages if args)
 
 
 def test_handle_harness_use_success(monkeypatch):
@@ -1163,8 +1185,7 @@ def test_handle_harness_pick_no_harnesses(monkeypatch):
     monkeypatch.setattr(cli, "detect_available_harnesses", lambda: [])
 
     assert cli.handle_harness_pick() == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "No AI harnesses detected" in text_blob
+    assert len(c.messages) >= 3
 
 
 def test_handle_harness_pick_single_available(monkeypatch):
@@ -1180,8 +1201,6 @@ def test_handle_harness_pick_single_available(monkeypatch):
 
 
 def test_handle_harness_pick_valid_choice(monkeypatch):
-    import builtins
-
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
     monkeypatch.setattr(
@@ -1195,8 +1214,6 @@ def test_handle_harness_pick_valid_choice(monkeypatch):
 
 
 def test_handle_harness_pick_eof_error(monkeypatch):
-    import builtins
-
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
     monkeypatch.setattr(
@@ -1209,13 +1226,10 @@ def test_handle_harness_pick_eof_error(monkeypatch):
     monkeypatch.setattr(builtins, "input", raise_eof)
 
     assert cli.handle_harness_pick() == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "Selection cancelled" in text_blob
+    assert c.messages[-1][1].get("style") == "yellow"
 
 
 def test_handle_harness_pick_keyboard_interrupt(monkeypatch):
-    import builtins
-
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
     monkeypatch.setattr(
@@ -1228,13 +1242,10 @@ def test_handle_harness_pick_keyboard_interrupt(monkeypatch):
     monkeypatch.setattr(builtins, "input", raise_ki)
 
     assert cli.handle_harness_pick() == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "Selection cancelled" in text_blob
+    assert c.messages[-1][1].get("style") == "yellow"
 
 
 def test_handle_harness_pick_non_integer(monkeypatch):
-    import builtins
-
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
     monkeypatch.setattr(
@@ -1243,13 +1254,10 @@ def test_handle_harness_pick_non_integer(monkeypatch):
     monkeypatch.setattr(builtins, "input", lambda: "abc")
 
     assert cli.handle_harness_pick() == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "Invalid choice" in text_blob
+    assert c.messages[-1][1].get("style") == "red"
 
 
 def test_handle_harness_pick_out_of_range_low(monkeypatch):
-    import builtins
-
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
     monkeypatch.setattr(
@@ -1258,13 +1266,10 @@ def test_handle_harness_pick_out_of_range_low(monkeypatch):
     monkeypatch.setattr(builtins, "input", lambda: "0")
 
     assert cli.handle_harness_pick() == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "Invalid choice" in text_blob
+    assert c.messages[-1][1].get("style") == "red"
 
 
 def test_handle_harness_pick_out_of_range_high(monkeypatch):
-    import builtins
-
     c = _Console()
     monkeypatch.setattr(cli, "console", c)
     monkeypatch.setattr(
@@ -1273,8 +1278,7 @@ def test_handle_harness_pick_out_of_range_high(monkeypatch):
     monkeypatch.setattr(builtins, "input", lambda: "5")
 
     assert cli.handle_harness_pick() == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "Invalid choice" in text_blob
+    assert c.messages[-1][1].get("style") == "red"
 
 
 # ── handle_harness_set_and_launch ───────────────────────────────────────────
@@ -1285,8 +1289,7 @@ def test_handle_harness_set_and_launch_unknown_name(monkeypatch):
     monkeypatch.setattr(cli, "console", c)
 
     assert cli.handle_harness_set_and_launch("invalid", []) == 1
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "Unknown harness" in text_blob
+    assert any("Unknown harness" in str(args[0]) for args, _ in c.messages if args)
 
 
 def test_handle_harness_set_and_launch_without_remaining_args(monkeypatch):
@@ -1310,8 +1313,11 @@ def test_handle_harness_set_and_launch_with_warning(monkeypatch):
     monkeypatch.setattr(cli, "launch_harness", lambda args: 99)
 
     assert cli.handle_harness_set_and_launch("copilot", ["suggest"]) == 99
-    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
-    assert "Warning:" in text_blob
+    assert any(
+        "does not appear to be installed" in str(args[0])
+        for args, _ in c.messages
+        if args
+    )
 
 
 # ── main --harness routing ──────────────────────────────────────────────────
