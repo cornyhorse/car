@@ -233,21 +233,37 @@ def test_restore_terminal_state_does_not_clear_screen(monkeypatch):
     assert ["tput", "clear"] not in seen
 
 
-def test_run_in_pty(monkeypatch):
-    monkeypatch.setenv("SAVED", "1")
-    seen = {"cmd": None, "env_k": None}
+def test_run_in_pty_parent_path(monkeypatch):
+    """pty.spawn path returns status and preserves explicit env semantics."""
+    seen: dict[str, list[str]] = {"cmd": []}
 
     def fake_spawn(cmd):
         seen["cmd"] = cmd
-        seen["env_k"] = os.environ.get("K")
         return 0
 
     monkeypatch.setattr(harness.pty, "spawn", fake_spawn)
+
     rc = harness._run_in_pty(["claude"], {"K": "V"})
     assert rc == 0
-    assert seen["cmd"] == ["claude"]
-    assert seen["env_k"] == "V"
-    assert os.environ.get("SAVED") == "1"
+    assert seen["cmd"][:2] == ["env", "K=V"]
+    assert seen["cmd"][-1] == "claude"
+
+
+def test_run_in_pty_child_receives_env(monkeypatch):
+    """_run_in_pty includes all env vars in env command line."""
+    seen: dict[str, list[str]] = {"cmd": []}
+
+    def fake_spawn(cmd):
+        seen["cmd"] = cmd
+        return 0
+
+    monkeypatch.setattr(harness.pty, "spawn", fake_spawn)
+
+    harness._run_in_pty(["claude", "chat"], {"K": "V", "X": "Y"})
+
+    assert "K=V" in seen["cmd"]
+    assert "X=Y" in seen["cmd"]
+    assert seen["cmd"][-2:] == ["claude", "chat"]
 
 
 def test_detect_available_harnesses_both(monkeypatch):

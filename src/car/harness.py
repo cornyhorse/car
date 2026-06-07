@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import pty
 import shutil
@@ -169,14 +170,13 @@ def _restore_terminal_state() -> None:
 
 
 def _run_in_pty(cmd: list[str], env: dict[str, str]) -> int:
-    previous_env = os.environ.copy()
-    os.environ.clear()
-    os.environ.update(env)
-    try:
-        status = pty.spawn(cmd)
-    finally:
-        os.environ.clear()
-        os.environ.update(previous_env)
+    """Run *cmd* in a PTY with explicit environment variables.
+
+    Uses `/usr/bin/env` semantics via `env` command so we keep pty.spawn's
+    interactive relay behavior while still applying explicit overrides.
+    """
+    env_cmd = ["env", *[f"{k}={v}" for k, v in env.items()], *cmd]
+    status = pty.spawn(env_cmd)
 
     try:
         return os.waitstatus_to_exitcode(status)
