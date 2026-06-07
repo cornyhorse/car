@@ -608,6 +608,38 @@ def test_handle_key_set_paths(monkeypatch):
     assert seen["saved"] == 1
 
 
+def test_handle_key_set_rejects_secret_like_key_name(monkeypatch):
+    st = CarState(openrouter_base_url="u", key_name="openrouter_api_key")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    seen = {"value": None, "key_name": "unset", "saved": 0}
+
+    def fake_store(_state, value, key_name=None):
+        seen["value"] = value
+        seen["key_name"] = key_name
+        return "openrouter_api_key"
+
+    monkeypatch.setattr(cli, "store_openrouter_key", fake_store)
+    monkeypatch.setattr(
+        cli,
+        "save_state",
+        lambda _state: seen.update({"saved": seen["saved"] + 1}),
+    )
+
+    assert cli.handle_key(
+        st,
+        _args(action="set", value="arg-token", key_name="sk-or-v1-secret"),
+    ) == 0
+    assert seen["value"] == "arg-token"
+    assert seen["key_name"] is None
+    assert seen["saved"] == 0
+    assert st.key_name == "openrouter_api_key"
+
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "That looks like an API key, not a name." in text_blob
+
+
 def test_handle_key_set_failures(monkeypatch):
     st = CarState()
     c = _Console()
@@ -678,7 +710,7 @@ def test_handle_tui_paths(monkeypatch):
         "save_state",
         lambda state: saved.update({"called": True}),
     )
-    monkeypatch.setattr(cli, "launch_copilot", lambda args: 0)
+    monkeypatch.setattr(cli, "launch_harness", lambda args: 0)
     assert cli.handle_tui(st) == 0
     assert st.selected_model == "x/y"
     assert st.provider_lock == "openai"
@@ -688,7 +720,7 @@ def test_handle_tui_paths(monkeypatch):
     assert saved["called"] is True
 
     seen = {"args": None}
-    monkeypatch.setattr(cli, "launch_copilot", lambda args: seen.update({"args": args}) or 0)
+    monkeypatch.setattr(cli, "launch_harness", lambda args: seen.update({"args": args}) or 0)
     assert cli.handle_tui(st) == 0
     assert seen["args"] == []
 

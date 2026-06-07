@@ -456,6 +456,13 @@ def handle_key(state: CarState, args: argparse.Namespace) -> int:
 
     if action == "set":
         key_name_override = getattr(args, "key_name", "").strip()
+        if key_name_override.startswith("sk-or-v1-"):
+            console.print(
+                "That looks like an API key, not a name. "
+                "Using default key name instead: openrouter_api_key",
+                style="yellow",
+            )
+            key_name_override = ""
         value = getattr(args, "value", "").strip()
 
         if not value:

@@ -668,10 +668,22 @@ configure_keys_wizard() {
   fi
 
   if can_prompt; then
-    read -r -p "mattstash key name [$key_name]: " entered_key_name </dev/tty
-    if [ -n "${entered_key_name:-}" ]; then
-      key_name="$entered_key_name"
-    fi
+    while true; do
+      read -r -p "mattstash key name [$key_name]: " entered_key_name </dev/tty
+      if [ -n "${entered_key_name:-}" ]; then
+        key_name="$entered_key_name"
+      fi
+      case "$key_name" in
+        sk-or-v1-*)
+          warn "That looks like an API key, not a name."
+          warn "Please enter a descriptive name (e.g. 'openrouter_api_key'), not the secret itself."
+          key_name="$CAR_MATTSTASH_KEY_NAME"
+          ;;
+        *)
+          break
+          ;;
+      esac
+    done
 
     read -r -s -p "OpenRouter API key: " key_value </dev/tty
     printf '\n'

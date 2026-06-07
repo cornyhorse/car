@@ -383,6 +383,14 @@ def test_state_from_dict_sanitizes_favorites_and_route_mode():
     assert result.route_mode == "model"
 
 
+def test_state_from_dict_resets_secret_like_key_name_to_default():
+    result = state._state_from_dict({
+        "key_name": "sk-or-v1-abc123",
+    })
+
+    assert result.key_name == "openrouter_api_key"
+
+
 def test_extract_mattstash_value_json_and_structured_output():
     assert (
         state._extract_mattstash_value(

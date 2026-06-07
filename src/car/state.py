@@ -46,6 +46,9 @@ def _state_from_dict(data: dict[str, Any]) -> CarState:
     if state.harness not in {"copilot", "claude"}:
         state.harness = "copilot"
 
+    if state.key_name.startswith("sk-or-v1-"):
+        state.key_name = "openrouter_api_key"
+
     return state
 
 
