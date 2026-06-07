@@ -191,7 +191,9 @@ def _run_in_pty(cmd: list[str], env: dict[str, str]) -> int:
     Uses `/usr/bin/env` semantics via `env` command so we keep pty.spawn's
     interactive relay behavior while still applying explicit overrides.
     """
-    env_cmd = ["env", *[f"{k}={v}" for k, v in env.items()], *cmd]
+    # Use `env -i` so the child receives exactly the provided environment.
+    # This is required to scrub conflicting provider/auth vars for Claude.
+    env_cmd = ["env", "-i", *[f"{k}={v}" for k, v in env.items()], *cmd]
     status = pty.spawn(env_cmd)
 
     try:

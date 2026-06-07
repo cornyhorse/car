@@ -263,7 +263,7 @@ def test_run_in_pty_parent_path(monkeypatch):
 
     rc = harness._run_in_pty(["claude"], {"K": "V"})
     assert rc == 0
-    assert seen["cmd"][:2] == ["env", "K=V"]
+    assert seen["cmd"][:3] == ["env", "-i", "K=V"]
     assert seen["cmd"][-1] == "claude"
 
 
