@@ -131,6 +131,29 @@ def check_claude_installed() -> DoctorResult:
     return DoctorResult("claude", True, f"Found at {claude_path}")
 
 
+def _is_standard_model(model_id: str) -> bool:
+    """Check if model is in Claude Code's built-in registry.
+
+    Standard models are recognized by Claude Code without explicit
+    registration. Third-party models like DeepSeek need explicit
+    ANTHROPIC_CUSTOM_MODEL_OPTION registration.
+    """
+    known_prefixes = {
+        "claude",      # Anthropic
+        "gpt",         # OpenAI
+        "gemini",      # Google
+        "command",     # Cohere
+        "llama",       # Meta
+        "mistral",     # Mistral
+        "azure",       # Azure/OpenAI via Bedrock
+    }
+    # Extract the model name part: handle "provider/model" by taking the last part
+    # then extract prefix before first dash to handle "claude-opus-4-6" -> "claude"
+    base = model_id.split("/")[-1].lower()
+    model_prefix = base.split("-")[0]
+    return model_prefix in known_prefixes
+
+
 def claude_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
     env = os.environ.copy()
     # Remove potentially conflicting Claude provider/auth routing vars so the
@@ -140,6 +163,8 @@ def claude_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
         "ANTHROPIC_AUTH_TOKEN",
         "ANTHROPIC_BASE_URL",
         "ANTHROPIC_MODEL",
+        "ANTHROPIC_CUSTOM_MODEL_OPTION",
+        "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
         "CLAUDE_CODE_USE_BEDROCK",
         "CLAUDE_CODE_USE_VERTEX",
         "CLAUDE_CODE_USE_FOUNDRY",
@@ -159,6 +184,15 @@ def claude_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
     env["ANTHROPIC_API_KEY"] = api_key
     env["ANTHROPIC_AUTH_TOKEN"] = api_key
     env["ANTHROPIC_MODEL"] = model_id
+
+    # Register non-standard models (e.g., DeepSeek via OpenRouter) so Claude
+    # Code recognizes them as valid instead of rejecting as "not found".
+    if not _is_standard_model(model_id):
+        env["ANTHROPIC_CUSTOM_MODEL_OPTION"] = model_id
+        provider, _, name = model_id.partition("/")
+        friendly_name = name or model_id
+        env["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"] = friendly_name
+
     return env
 
 

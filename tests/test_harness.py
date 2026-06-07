@@ -150,6 +150,40 @@ def test_claude_env_scrubs_conflicting_provider_and_auth_vars(monkeypatch):
     assert "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST" not in env
 
 
+def test_is_standard_model_recognizes_built_in():
+    assert harness._is_standard_model("claude-opus-4-6") is True
+    assert harness._is_standard_model("gpt-4o") is True
+    assert harness._is_standard_model("gemini-2.0-flash") is True
+    assert harness._is_standard_model("command-r-plus") is True
+    assert harness._is_standard_model("llama-2") is True
+    assert harness._is_standard_model("mistral-large") is True
+
+
+def test_is_standard_model_recognizes_gateway_models():
+    assert harness._is_standard_model("deepseek/deepseek-v4-pro") is False
+    assert harness._is_standard_model("qwen/qwen-turbo") is False
+    assert harness._is_standard_model("yi/yi-lightning") is False
+    assert harness._is_standard_model("nex-agi/deepseek-v3.1-nex-n1") is False
+
+
+def test_claude_env_registers_standard_models():
+    env = harness.claude_env("https://openrouter.ai/api/v1", "key", "gpt-4o")
+    assert "ANTHROPIC_CUSTOM_MODEL_OPTION" not in env
+    assert "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME" not in env
+
+
+def test_claude_env_registers_gateway_models():
+    env = harness.claude_env(
+        "https://openrouter.ai/api/v1", "key", "deepseek/deepseek-v4-pro"
+    )
+    assert env["ANTHROPIC_CUSTOM_MODEL_OPTION"] == "deepseek/deepseek-v4-pro"
+    assert env["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"] == "deepseek-v4-pro"
+
+    env = harness.claude_env("https://openrouter.ai/api/v1", "key", "qwen/qwen-turbo")
+    assert env["ANTHROPIC_CUSTOM_MODEL_OPTION"] == "qwen/qwen-turbo"
+    assert env["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"] == "qwen-turbo"
+
+
 def test_exec_copilot_paths(monkeypatch):
     seen: dict[str, list[str]] = {"cmd": []}
 
