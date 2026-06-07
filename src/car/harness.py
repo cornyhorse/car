@@ -143,7 +143,9 @@ def claude_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
 
 
 def _restore_terminal_state() -> None:
-    # Best-effort cleanup after interactive TUI sessions.
+    # Best-effort cleanup after interactive PTY/TUI sessions.
+    # We reset terminal attributes but deliberately do NOT clear the
+    # screen — that would wipe harness output the user wants to see.
     try:
         sys.stdout.write("\r\033[K")
         sys.stdout.flush()
@@ -154,7 +156,6 @@ def _restore_terminal_state() -> None:
         ["stty", "sane"],
         ["tput", "sgr0"],
         ["tput", "cnorm"],
-        ["tput", "clear"],
     ):
         try:
             subprocess.run(

@@ -216,6 +216,23 @@ def test_exec_claude_keyboard_interrupt(monkeypatch):
     assert harness.exec_claude([], {}) == 130
 
 
+def test_restore_terminal_state_does_not_clear_screen(monkeypatch):
+    seen: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(args=cmd, returncode=0)
+
+    monkeypatch.setattr(harness.subprocess, "run", fake_run)
+
+    harness._restore_terminal_state()
+
+    assert ["stty", "sane"] in seen
+    assert ["tput", "sgr0"] in seen
+    assert ["tput", "cnorm"] in seen
+    assert ["tput", "clear"] not in seen
+
+
 def test_run_in_pty(monkeypatch):
     monkeypatch.setenv("SAVED", "1")
     seen = {"cmd": None, "env_k": None}
