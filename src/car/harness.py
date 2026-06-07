@@ -115,7 +115,7 @@ def exec_copilot(
     except OSError as exc:
         print(f"Copilot executable failed to start: {exc}")
         return 1
-    return 1
+    return 1  # pragma: no cover — os.execvpe never returns on success
 
 
 # ── Claude Code harness ──────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ def _restore_terminal_state() -> None:
     try:
         sys.stdout.write("\r\033[K")
         sys.stdout.flush()
-    except Exception:
+    except Exception:  # pragma: no cover
         pass
 
     for cmd in (
@@ -163,7 +163,7 @@ def _restore_terminal_state() -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except FileNotFoundError:
+        except FileNotFoundError:  # pragma: no cover
             continue
 
 
@@ -179,7 +179,7 @@ def _run_in_pty(cmd: list[str], env: dict[str, str]) -> int:
 
     try:
         return os.waitstatus_to_exitcode(status)
-    except AttributeError:
+    except AttributeError:  # pragma: no cover — Python < 3.9 fallback
         if os.WIFEXITED(status):
             return os.WEXITSTATUS(status)
         if os.WIFSIGNALED(status):

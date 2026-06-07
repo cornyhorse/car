@@ -357,6 +357,15 @@ def test_exec_harness_dispatches(monkeypatch):
     assert seen["harness"] == "claude"
 
 
+def test_exec_copilot_os_error(monkeypatch):
+    def oserror(*args, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(harness.os, "execvpe", oserror)
+    monkeypatch.setattr(harness.shutil, "which", lambda _: None)
+    assert harness.exec_copilot(["suggest"], {}) == 1
+
+
 def test_harness_display_name():
     assert harness.harness_display_name("copilot") == (
         "Copilot CLI (gh-copilot)"

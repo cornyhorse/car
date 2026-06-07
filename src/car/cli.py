@@ -225,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     return launch_harness(argv)
 
 
-def _repo_root_for_update() -> Path | None:
+def _repo_root_for_update() -> Path | None:  # pragma: no cover
     current = Path(__file__).resolve()
     for parent in current.parents:
         if (parent / ".git").exists() and (parent / "install.sh").exists():

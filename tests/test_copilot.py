@@ -78,35 +78,53 @@ def test_copilot_env_sets_variables(monkeypatch):
 
 
 def test_exec_copilot(monkeypatch):
-    ok = subprocess.CompletedProcess(args=["gh"], returncode=7)
-    seen = {"cmd": None}
+    seen = {"file": None, "cmd": None, "env": None}
 
-    def fake_run(cmd, **kwargs):
+    class _ExecCalled(Exception):
+        pass
+
+    def fake_exec(file, cmd, env):
+        seen["file"] = file
         seen["cmd"] = cmd
-        return ok
+        seen["env"] = env
+        raise _ExecCalled
 
     monkeypatch.setattr(
         _harness.shutil, "which",
         lambda name: "/usr/bin/copilot" if name == "copilot" else None,
     )
-    monkeypatch.setattr(_harness.subprocess, "run", fake_run)
-    assert copilot.exec_copilot(["suggest"], {"A": "1"}) == 7
+    monkeypatch.setattr(_harness.os, "execvpe", fake_exec)
+    try:
+        copilot.exec_copilot(["suggest"], {"A": "1"})
+    except _ExecCalled:
+        pass
     assert seen["cmd"][0] == "copilot"
+    assert seen["file"] == "copilot"
+    assert seen["env"] == {"A": "1"}
 
     monkeypatch.setattr(_harness.shutil, "which", lambda _name: None)
-    assert copilot.exec_copilot(["suggest"], {"A": "1"}) == 7
+    try:
+        copilot.exec_copilot(["suggest"], {"A": "1"})
+    except _ExecCalled:
+        pass
     assert seen["cmd"][:2] == ["gh", "copilot"]
 
-    assert copilot.exec_copilot(["suggest"], {"A": "1"}, backend="gh") == 7
+    try:
+        copilot.exec_copilot(["suggest"], {"A": "1"}, backend="gh")
+    except _ExecCalled:
+        pass
     assert seen["cmd"][:2] == ["gh", "copilot"]
 
-    assert copilot.exec_copilot(
-        ["suggest"], {"A": "1"}, backend="copilot",
-    ) == 7
+    try:
+        copilot.exec_copilot(
+            ["suggest"], {"A": "1"}, backend="copilot",
+        )
+    except _ExecCalled:
+        pass
     assert seen["cmd"][0] == "copilot"
 
-    def boom(*args, **kwargs):
+    def boom(*_args, **_kwargs):
         raise FileNotFoundError
 
-    monkeypatch.setattr(_harness.subprocess, "run", boom)
+    monkeypatch.setattr(_harness.os, "execvpe", boom)
     assert copilot.exec_copilot([], {}) == 1

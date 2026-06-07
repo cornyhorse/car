@@ -383,6 +383,14 @@ def test_state_from_dict_sanitizes_favorites_and_route_mode():
     assert result.route_mode == "model"
 
 
+def test_state_from_dict_sanitizes_invalid_harness():
+    result = state._state_from_dict({
+        "harness": "invalid",
+    })
+
+    assert result.harness == "copilot"
+
+
 def test_state_from_dict_resets_secret_like_key_name_to_default():
     result = state._state_from_dict({
         "key_name": "sk-or-v1-abc123",

@@ -1045,6 +1045,292 @@ def test_suggest_model_corrections_additional_branches():
     assert cli.suggest_model_corrections("zzzzzzzz", rows) == []
 
 
+# ── handle_harness ──────────────────────────────────────────────────────────
+
+
+def test_handle_harness_list_with_items(monkeypatch):
+    st = CarState(harness="copilot")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot", "claude"],
+    )
+
+    assert cli.handle_harness(st, _args(action="list")) == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "* copilot" in text_blob
+    assert "claude" in text_blob
+
+
+def test_handle_harness_list_empty(monkeypatch):
+    st = CarState(harness="copilot")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: [])
+
+    assert cli.handle_harness(st, _args(action="list")) == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "No AI harnesses detected" in text_blob
+
+
+def test_handle_harness_use_safety_net_unknown_name(monkeypatch):
+    st = CarState()
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    # Direct call with invalid name (safety net path)
+    assert cli.handle_harness(st, _args(action="use", name="invalid")) == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Unknown harness" in text_blob
+
+
+def test_handle_harness_use_not_installed_copilot(monkeypatch):
+    st = CarState(harness="claude")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: ["claude"])
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+
+    assert cli.handle_harness(st, _args(action="use", name="copilot")) == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "not installed" in text_blob
+    assert "gh extension install" in text_blob
+    assert "To force-set" in text_blob
+
+
+def test_handle_harness_use_not_installed_claude(monkeypatch):
+    st = CarState(harness="copilot")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: ["copilot"])
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+
+    assert cli.handle_harness(st, _args(action="use", name="claude")) == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "not installed" in text_blob
+    assert "curl -fsSL https://claude.ai/install.sh" in text_blob
+
+
+def test_handle_harness_use_success(monkeypatch):
+    st = CarState(harness="claude")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot", "claude"],
+    )
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+
+    assert cli.handle_harness(st, _args(action="use", name="copilot")) == 0
+    assert st.harness == "copilot"
+
+
+def test_handle_harness_current_available(monkeypatch):
+    st = CarState(harness="copilot")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot", "claude"],
+    )
+
+    assert cli.handle_harness(st, _args(action="current")) == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Harness: Copilot CLI" in text_blob
+    assert "Available: copilot, claude" in text_blob
+
+
+def test_handle_harness_current_none_available(monkeypatch):
+    st = CarState(harness="copilot")
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: [])
+
+    assert cli.handle_harness(st, _args(action="current")) == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Available: none" in text_blob
+
+
+def test_handle_harness_unknown_action(monkeypatch):
+    st = CarState()
+    assert cli.handle_harness(st, _args(action="unknown")) == 1
+
+
+# ── handle_harness_pick ─────────────────────────────────────────────────────
+
+
+def test_handle_harness_pick_no_harnesses(monkeypatch):
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: [])
+
+    assert cli.handle_harness_pick() == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "No AI harnesses detected" in text_blob
+
+
+def test_handle_harness_pick_single_available(monkeypatch):
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: ["copilot"])
+    monkeypatch.setattr(cli, "load_state", lambda: CarState())
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+
+    assert cli.handle_harness_pick() == 0
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Only one harness available" in text_blob
+
+
+def test_handle_harness_pick_valid_choice(monkeypatch):
+    import builtins
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot", "claude"],
+    )
+    monkeypatch.setattr(cli, "load_state", lambda: CarState())
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+    monkeypatch.setattr(builtins, "input", lambda: "2")
+
+    assert cli.handle_harness_pick() == 0
+
+
+def test_handle_harness_pick_eof_error(monkeypatch):
+    import builtins
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot", "claude"],
+    )
+
+    def raise_eof():
+        raise EOFError
+
+    monkeypatch.setattr(builtins, "input", raise_eof)
+
+    assert cli.handle_harness_pick() == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Selection cancelled" in text_blob
+
+
+def test_handle_harness_pick_keyboard_interrupt(monkeypatch):
+    import builtins
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot", "claude"],
+    )
+
+    def raise_ki():
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(builtins, "input", raise_ki)
+
+    assert cli.handle_harness_pick() == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Selection cancelled" in text_blob
+
+
+def test_handle_harness_pick_non_integer(monkeypatch):
+    import builtins
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot", "claude"],
+    )
+    monkeypatch.setattr(builtins, "input", lambda: "abc")
+
+    assert cli.handle_harness_pick() == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Invalid choice" in text_blob
+
+
+def test_handle_harness_pick_out_of_range_low(monkeypatch):
+    import builtins
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot", "claude"],
+    )
+    monkeypatch.setattr(builtins, "input", lambda: "0")
+
+    assert cli.handle_harness_pick() == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Invalid choice" in text_blob
+
+
+def test_handle_harness_pick_out_of_range_high(monkeypatch):
+    import builtins
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot", "claude"],
+    )
+    monkeypatch.setattr(builtins, "input", lambda: "5")
+
+    assert cli.handle_harness_pick() == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Invalid choice" in text_blob
+
+
+# ── handle_harness_set_and_launch ───────────────────────────────────────────
+
+
+def test_handle_harness_set_and_launch_unknown_name(monkeypatch):
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+
+    assert cli.handle_harness_set_and_launch("invalid", []) == 1
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Unknown harness" in text_blob
+
+
+def test_handle_harness_set_and_launch_without_remaining_args(monkeypatch):
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "load_state", lambda: CarState())
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+    monkeypatch.setattr(
+        cli, "detect_available_harnesses", lambda: ["copilot"],
+    )
+
+    assert cli.handle_harness_set_and_launch("copilot", []) == 0
+
+
+def test_handle_harness_set_and_launch_with_warning(monkeypatch):
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    monkeypatch.setattr(cli, "load_state", lambda: CarState())
+    monkeypatch.setattr(cli, "save_state", lambda _state: None)
+    monkeypatch.setattr(cli, "detect_available_harnesses", lambda: [])
+    monkeypatch.setattr(cli, "launch_harness", lambda args: 99)
+
+    assert cli.handle_harness_set_and_launch("copilot", ["suggest"]) == 99
+    text_blob = "\n".join(str(args[0]) for args, _ in c.messages if args)
+    assert "Warning:" in text_blob
+
+
+# ── main --harness routing ──────────────────────────────────────────────────
+
+
+def test_main_routes_harness_pick(monkeypatch):
+    monkeypatch.setattr(cli, "handle_harness_pick", lambda: 42)
+    assert cli.main(["--harness"]) == 42
+
+
+def test_main_routes_harness_direct_set(monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "handle_harness_set_and_launch",
+        lambda name, rest: 43,
+    )
+    assert cli.main(["--harness", "copilot", "suggest"]) == 43
+
+
 def test_resolve_model_token_limits(monkeypatch):
     rows = [
         ModelEntry(
