@@ -488,13 +488,15 @@ ensure_python_package_in_tools_venv() {
 }
 
 ensure_car_host_cli_installed() {
+  # Always sync the host CLI to the latest checked-out source.
+  # This avoids stale installs when the venv previously had a non-editable
+  # package or when console scripts point at older metadata.
   if [ "$CAR_FORCE" = "1" ] || [ ! -x "$CAR_TOOLS_CAR" ]; then
     log "Installing car host CLI in tools venv"
-    "$CAR_TOOLS_PIP" install --editable "$CAR_HOME"
-    return
+  else
+    log "Updating car host CLI in tools venv"
   fi
-
-  log "car host CLI already installed in tools venv"
+  "$CAR_TOOLS_PIP" install --editable "$CAR_HOME"
 }
 
 ensure_host_tools() {
