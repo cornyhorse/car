@@ -133,6 +133,22 @@ def check_claude_installed() -> DoctorResult:
 
 def claude_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
     env = os.environ.copy()
+    # Remove potentially conflicting Claude provider/auth routing vars so the
+    # wrapper-selected OpenRouter settings win deterministically.
+    for key in (
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_MODEL",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "CLAUDE_CODE_USE_MANTLE",
+        "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+        "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+    ):
+        env.pop(key, None)
+
     # ANTHROPIC_BASE_URL overrides the API endpoint (points at OpenRouter).
     # ANTHROPIC_API_KEY is the bearer token Claude Code sends to that endpoint.
     # ANTHROPIC_MODEL selects the model; Claude Code reads this env var

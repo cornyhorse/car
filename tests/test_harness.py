@@ -131,6 +131,24 @@ def test_claude_env(monkeypatch):
     assert env["ANTHROPIC_MODEL"] == "m"
 
 
+def test_claude_env_scrubs_conflicting_provider_and_auth_vars(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "old-key")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "old-token")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://wrong.example")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "wrong/model")
+    monkeypatch.setenv("CLAUDE_CODE_USE_BEDROCK", "1")
+    monkeypatch.setenv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1")
+
+    env = harness.claude_env("https://openrouter.example", "new-key", "new/model")
+
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.example"
+    assert env["ANTHROPIC_API_KEY"] == "new-key"
+    assert env["ANTHROPIC_MODEL"] == "new/model"
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert "CLAUDE_CODE_USE_BEDROCK" not in env
+    assert "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST" not in env
+
+
 def test_exec_copilot_paths(monkeypatch):
     seen: dict[str, list[str]] = {"cmd": []}
 
