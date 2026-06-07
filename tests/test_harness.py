@@ -124,12 +124,12 @@ def test_copilot_env(monkeypatch):
 
 def test_claude_env(monkeypatch):
     monkeypatch.setenv("SENTINEL", "1")
-    env = harness.claude_env("u", "k", "m")
+    env = harness.claude_env("https://openrouter.ai/api/v1", "key123", "model-id")
     assert env["SENTINEL"] == "1"
-    assert env["ANTHROPIC_BASE_URL"] == "u"
-    assert env["ANTHROPIC_API_KEY"] == "k"
-    assert env["ANTHROPIC_AUTH_TOKEN"] == "k"
-    assert env["ANTHROPIC_MODEL"] == "m"
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"  # /v1 removed
+    assert env["ANTHROPIC_API_KEY"] == ""  # Must be empty for OpenRouter
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "key123"
+    assert env["ANTHROPIC_MODEL"] == "model-id"
 
 
 def test_claude_env_scrubs_conflicting_provider_and_auth_vars(monkeypatch):
@@ -140,10 +140,10 @@ def test_claude_env_scrubs_conflicting_provider_and_auth_vars(monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_USE_BEDROCK", "1")
     monkeypatch.setenv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1")
 
-    env = harness.claude_env("https://openrouter.example", "new-key", "new/model")
+    env = harness.claude_env("https://openrouter.example/v1", "new-key", "new/model")
 
-    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.example"
-    assert env["ANTHROPIC_API_KEY"] == "new-key"
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.example"  # /v1 normalized
+    assert env["ANTHROPIC_API_KEY"] == ""  # Empty for OpenRouter
     assert env["ANTHROPIC_AUTH_TOKEN"] == "new-key"
     assert env["ANTHROPIC_MODEL"] == "new/model"
     assert "CLAUDE_CODE_USE_BEDROCK" not in env

@@ -698,7 +698,7 @@ def launch_harness(
             if key not in env:
                 continue
             value = env[key]
-            if "KEY" in key or "TOKEN" in key:
+            if "TOKEN" in key:
                 value = "<set>" if value else "<unset>"
             console.print(f"[debug] {key}={value}")
 

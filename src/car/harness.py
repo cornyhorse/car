@@ -174,14 +174,14 @@ def claude_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
     ):
         env.pop(key, None)
 
-    # ANTHROPIC_BASE_URL overrides the API endpoint (points at OpenRouter).
-    # ANTHROPIC_API_KEY is the bearer token Claude Code sends to that endpoint.
-    # ANTHROPIC_AUTH_TOKEN mirrors the same bearer for paths that read
-    # Authorization directly.
-    # ANTHROPIC_MODEL selects the model; Claude Code reads this env var
-    # directly (verified against Claude Code CLI docs).
-    env["ANTHROPIC_BASE_URL"] = base_url
-    env["ANTHROPIC_API_KEY"] = api_key
+    # Per OpenRouter docs for Claude Code integration:
+    # - ANTHROPIC_BASE_URL: endpoint (without /v1 suffix)
+    # - ANTHROPIC_API_KEY: MUST be empty string (critical!)
+    # - ANTHROPIC_AUTH_TOKEN: actual OpenRouter API key
+    # - ANTHROPIC_MODEL: model ID to use
+    base_url_normalized = base_url.rstrip("/v1") if base_url.endswith("/v1") else base_url
+    env["ANTHROPIC_BASE_URL"] = base_url_normalized
+    env["ANTHROPIC_API_KEY"] = ""  # Critical: must be empty for OpenRouter routing
     env["ANTHROPIC_AUTH_TOKEN"] = api_key
     env["ANTHROPIC_MODEL"] = model_id
 
