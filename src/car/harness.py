@@ -151,10 +151,13 @@ def claude_env(base_url: str, api_key: str, model_id: str) -> dict[str, str]:
 
     # ANTHROPIC_BASE_URL overrides the API endpoint (points at OpenRouter).
     # ANTHROPIC_API_KEY is the bearer token Claude Code sends to that endpoint.
+    # ANTHROPIC_AUTH_TOKEN mirrors the same bearer for paths that read
+    # Authorization directly.
     # ANTHROPIC_MODEL selects the model; Claude Code reads this env var
     # directly (verified against Claude Code CLI docs).
     env["ANTHROPIC_BASE_URL"] = base_url
     env["ANTHROPIC_API_KEY"] = api_key
+    env["ANTHROPIC_AUTH_TOKEN"] = api_key
     env["ANTHROPIC_MODEL"] = model_id
     return env
 

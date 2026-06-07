@@ -128,6 +128,7 @@ def test_claude_env(monkeypatch):
     assert env["SENTINEL"] == "1"
     assert env["ANTHROPIC_BASE_URL"] == "u"
     assert env["ANTHROPIC_API_KEY"] == "k"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "k"
     assert env["ANTHROPIC_MODEL"] == "m"
 
 
@@ -143,8 +144,8 @@ def test_claude_env_scrubs_conflicting_provider_and_auth_vars(monkeypatch):
 
     assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.example"
     assert env["ANTHROPIC_API_KEY"] == "new-key"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "new-key"
     assert env["ANTHROPIC_MODEL"] == "new/model"
-    assert "ANTHROPIC_AUTH_TOKEN" not in env
     assert "CLAUDE_CODE_USE_BEDROCK" not in env
     assert "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST" not in env
 

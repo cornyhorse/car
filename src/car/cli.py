@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import getpass
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -178,6 +179,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+
+    if "--debug" in argv:
+        os.environ["CAR_DEBUG"] = "1"
+        argv = [x for x in argv if x != "--debug"]
+
     parser = build_parser()
 
     if argv and argv[0] == "--update":
@@ -668,6 +674,31 @@ def launch_harness(
         env["CAR_PROVIDER_LOCK"] = state.provider_lock
         env["CAR_PROVIDER_LOCK_MODE"] = state.provider_lock_mode
     env["CAR_ROUTE_MODE"] = state.route_mode
+
+    debug_mode = os.environ.get("CAR_DEBUG", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    if debug_mode:
+        console.print(
+            f"[debug] cli={Path(__file__).resolve()} "
+            f"python={sys.executable} harness={harness} model={model}"
+        )
+        for key in (
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
+            "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+        ):
+            if key not in env:
+                continue
+            value = env[key]
+            if "KEY" in key or "TOKEN" in key:
+                value = "<set>" if value else "<unset>"
+            console.print(f"[debug] {key}={value}")
 
     return exec_harness(harness, harness_args, env, backend=backend)
 

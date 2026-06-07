@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import builtins
+import os
 
 from car import cli
 from car.openrouter import ModelEntry, OpenRouterError
@@ -70,6 +71,21 @@ def test_build_parser_parses_key_set():
 def test_main_routes_no_args(monkeypatch):
     monkeypatch.setattr(cli, "launch_harness", lambda args: 7)
     assert cli.main([]) == 7
+
+
+def test_main_debug_flag_sets_env_and_strips_arg(monkeypatch):
+    received = {"args": None}
+
+    def fake_launch(args):
+        received["args"] = args
+        return 12
+
+    monkeypatch.setattr(cli, "launch_harness", fake_launch)
+    monkeypatch.delenv("CAR_DEBUG", raising=False)
+
+    assert cli.main(["--debug", "suggest", "hello"]) == 12
+    assert received["args"] == ["suggest", "hello"]
+    assert os.environ.get("CAR_DEBUG") == "1"
 
 
 def test_main_routes_subcommand(monkeypatch):
