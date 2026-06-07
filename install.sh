@@ -263,7 +263,6 @@ cleanup_terminal() {
   stty sane 2>/dev/null || true
   tput sgr0 2>/dev/null || true
   tput cnorm 2>/dev/null || true
-  tput clear 2>/dev/null || true
 }
 trap cleanup_terminal EXIT INT TERM
 
@@ -315,7 +314,6 @@ cleanup_terminal() {
   stty sane 2>/dev/null || true
   tput sgr0 2>/dev/null || true
   tput cnorm 2>/dev/null || true
-  tput clear 2>/dev/null || true
 }
 trap cleanup_terminal EXIT INT TERM
 
