@@ -17,7 +17,17 @@ CAR_FORCE="${CAR_FORCE:-0}"
 CAR_CONFIGURE_KEYS="${CAR_CONFIGURE_KEYS:-ask}"
 CAR_ENABLE_MATTSTASH_PROFILE="${CAR_ENABLE_MATTSTASH_PROFILE:-ask}"
 CAR_TOOLS_VENV="${CAR_TOOLS_VENV:-$HOME/.local/share/car/venv-tools}"
-CAR_MATTSTASH_PACKAGE="${CAR_MATTSTASH_PACKAGE:-mattstash}"
+# mattstash 0.2.x requires Python >= 3.11. Hosts with an older python3 (docker mode does not
+# need 3.11 for car itself) stay on the last releases that support them, as before.
+default_mattstash_package() {
+  if command -v python3 >/dev/null 2>&1 \
+    && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1; then
+    printf '%s' 'mattstash>=0.2,<0.3'
+  else
+    printf '%s' 'mattstash<0.2'
+  fi
+}
+CAR_MATTSTASH_PACKAGE="${CAR_MATTSTASH_PACKAGE:-$(default_mattstash_package)}"
 CAR_MATTSTASH_KEY_NAME="${CAR_MATTSTASH_KEY_NAME:-openrouter_api_key}"
 
 CAR_TOOLS_PYTHON="$CAR_TOOLS_VENV/bin/python"
@@ -560,24 +570,55 @@ ensure_harnesses_installed() {
   fi
 }
 
+# mattstash >= 0.1.20 prompts for a master password on `setup` unless told otherwise (and fails
+# without a terminal, e.g. `curl ... | bash`). car reads the key non-interactively on every run,
+# so create the database with a sidecar password file, which is what older releases always did.
+# Releases before 0.1.20 have no --sidecar flag; for those, plain `setup` is used.
+mattstash_setup_args() {
+  local help_text
+  help_text="$("$CAR_MATTSTASH_CLI" setup --help 2>&1 || true)"
+  case "$help_text" in
+    *--sidecar*) printf '%s' 'setup --sidecar' ;;
+    *) printf '%s' 'setup' ;;
+  esac
+}
+
 ensure_mattstash_initialized() {
   if "$CAR_MATTSTASH_CLI" keys >/dev/null 2>&1; then
     return 0
   fi
 
+  local setup_args
+  setup_args="$(mattstash_setup_args)"
+
   if ! can_prompt; then
     warn "mattstash is not initialized and non-interactive mode is enabled"
-    warn "Run manually: $CAR_MATTSTASH_CLI setup"
+    warn "Run manually: $CAR_MATTSTASH_CLI $setup_args"
     return 1
   fi
 
-  if prompt_yes_no "mattstash is not initialized. Run mattstash setup now?" "y"; then
-    "$CAR_MATTSTASH_CLI" setup
-    return 0
-  else
+  if ! prompt_yes_no "mattstash is not initialized. Run mattstash setup now?" "y"; then
     warn "Skipping mattstash setup; key storage may fail until setup is completed"
     return 1
   fi
+
+  local rc=0
+  # shellcheck disable=SC2086 # setup_args is two fixed words
+  "$CAR_MATTSTASH_CLI" $setup_args || rc=$?
+  case "$rc" in
+    0)
+      return 0
+      ;;
+    8)
+      warn "mattstash setup refused to overwrite existing files"
+      warn "If a database already exists, provide its master password (KDBX_PASSWORD or KDBX_PASSWORD_FILE) and re-run"
+      return 1
+      ;;
+    *)
+      warn "mattstash setup failed (exit $rc); key storage may fail until setup is completed"
+      return 1
+      ;;
+  esac
 }
 
 persist_key_name() {
@@ -767,7 +808,8 @@ configure_mattstash_profile() {
 
   log "Optional mattstash profile is available in docker-compose.yml"
   log "Start it with: docker compose --profile mattstash up -d mattstash"
-  log "Required env before startup: KDBX_PASSWORD and MATTSTASH_API_KEY"
+  log "Required env before startup: KDBX_PASSWORD and MATTSTASH_API_KEY (at least 32 characters)"
+  log "The server never creates a database: ~/.credentials/mattstash.kdbx must already exist"
 }
 
 warm_model_cache() {

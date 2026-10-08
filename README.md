@@ -76,13 +76,22 @@ When invoked via the generated `car` wrapper in docker mode, the container runs
 as your host UID/GID to avoid root-owned files in `~/.config/car` and
 `~/.cache/car`.
 
-Optional mattstash container profile:
+Optional mattstash container profile (pinned to the mattstash `v0.2.0` server image):
 
 ```bash
 export KDBX_PASSWORD="..."
-export MATTSTASH_API_KEY="..."
+export MATTSTASH_API_KEY="$(openssl rand -base64 32)"
 docker compose --profile mattstash up -d mattstash
 ```
+
+Requirements of the mattstash 0.2 server:
+
+- The database must already exist at `~/.credentials/mattstash.kdbx`; the server never creates one
+  (create it with `mattstash --db ~/.credentials/mattstash.kdbx setup`).
+- `KDBX_PASSWORD` is the database master password. The server does not read the `.mattstash.txt` sidecar.
+- `MATTSTASH_API_KEY` must be at least 32 characters.
+- The server is read-only (the database is mounted `:ro`). car itself only uses the `mattstash` CLI against
+  the local database and never writes through the server.
 
 ## Key Setup
 
@@ -95,7 +104,9 @@ car resolves OpenRouter key in this order:
 
 Installer key wizard flow:
 
-1. Detects or initializes mattstash setup.
+1. Detects or initializes mattstash setup (`mattstash setup --sidecar`, which stores a generated master
+   password next to the database so car can read the key non-interactively; mattstash 0.2 no longer
+   creates a database on first use).
 2. Prompts for key name (default openrouter_api_key).
 3. Stores value via mattstash put <key_name> --value ...
 

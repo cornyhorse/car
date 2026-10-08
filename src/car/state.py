@@ -9,6 +9,10 @@ from typing import Any
 
 from car.paths import ensure_dirs, state_file
 
+# mattstash >= 0.1.20 exit codes: 6 = database not found, 7 = database cannot be opened
+# (no or wrong master password, corrupt file, lock timeout).
+_MATTSTASH_DATABASE_EXIT_CODES = frozenset({6, 7})
+
 
 @dataclass
 class CarState:
@@ -140,6 +144,13 @@ def store_openrouter_key(
 
     if result.returncode != 0:
         detail = result.stderr.strip() or "unable to store key"
+        if result.returncode in _MATTSTASH_DATABASE_EXIT_CODES:
+            # mattstash 0.2 no longer creates a database on first use.
+            detail += (
+                "; if mattstash has no database yet, create one with "
+                "'mattstash setup --sidecar', otherwise provide its master password "
+                "via KDBX_PASSWORD or KDBX_PASSWORD_FILE"
+            )
         raise RuntimeError(f"mattstash put failed: {detail}")
 
     read_back = _mattstash_get_value(mattstash, resolved_key_name)

@@ -22,8 +22,15 @@ services:
       - HOME=/home/car
     entrypoint: ["car"]
 
+  # Optional mattstash API server (mattstash 0.2 defaults):
+  # - read-only: the database is mounted :ro and MATTSTASH_ALLOW_WRITES stays off, so POST/DELETE
+  #   answer 405 (car only reads secrets; it never writes through the server)
+  # - the server never creates a database: ${HOME}/.credentials/mattstash.kdbx must already exist
+  #   (mattstash --db ~/.credentials/mattstash.kdbx setup ...)
+  # - MATTSTASH_API_KEY must be at least 32 characters (openssl rand -base64 32)
+  # - the server does not read the .mattstash.txt sidecar: KDBX_PASSWORD must be set
   mattstash:
-    image: ghcr.io/cornyhorse/mattstash:latest
+    image: ghcr.io/cornyhorse/mattstash:v0.2.0
     profiles: ["mattstash"]
     environment:
       - MATTSTASH_DB_PATH=/data/mattstash.kdbx
