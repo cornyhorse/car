@@ -418,7 +418,8 @@ def test_build_harness_env_claude(monkeypatch):
     monkeypatch.setenv("X", "y")
     env = harness.build_harness_env("claude", "url", "key", "model")
     assert env["ANTHROPIC_BASE_URL"] == "url"
-    assert env["ANTHROPIC_API_KEY"] == "key"
+    assert env["ANTHROPIC_API_KEY"] == ""  # Must be empty for OpenRouter (see claude_env)
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "key"  # The OpenRouter key goes here instead
     assert env["ANTHROPIC_MODEL"] == "model"
     assert "COPILOT_PROVIDER_BASE_URL" not in env
 

@@ -4,7 +4,10 @@ import argparse
 import builtins
 import os
 
+import pytest
+
 from car import cli
+from car import harness as harness_module
 from car.openrouter import ModelEntry, OpenRouterError
 from car.state import CarState
 
@@ -81,7 +84,12 @@ def test_main_debug_flag_sets_env_and_strips_arg(monkeypatch):
         return 12
 
     monkeypatch.setattr(cli, "launch_harness", fake_launch)
-    monkeypatch.delenv("CAR_DEBUG", raising=False)
+    # main() writes CAR_DEBUG straight into os.environ. delenv(raising=False) records nothing
+    # when the variable is absent, so on its own it would leave CAR_DEBUG=1 set for every later
+    # test (turning the debug output on in all of them). Setting it first makes monkeypatch
+    # restore the original (unset) state on teardown.
+    monkeypatch.setenv("CAR_DEBUG", "")
+    monkeypatch.delenv("CAR_DEBUG")
 
     assert cli.main(["--debug", "suggest", "hello"]) == 12
     assert received["args"] == ["suggest", "hello"]
@@ -906,6 +914,99 @@ def test_launch_copilot_passes_backend(monkeypatch):
     monkeypatch.setattr(cli, "exec_harness", fake_exec)
     assert cli.launch_copilot([], backend="gh") == 0
     assert seen["backend"] == "gh"
+
+
+def _stub_launch_harness(monkeypatch, harness_name, env):
+    """Run launch_harness against stubs; returns (console, env handed to exec_harness)."""
+    st = CarState(selected_model="m", provider_lock=None, harness=harness_name)
+    monkeypatch.setattr(cli, "load_state", lambda: st)
+    monkeypatch.setattr(cli, "resolve_openrouter_key", lambda state: "token")
+    monkeypatch.setattr(cli, "ensure_models_fresh", lambda state: None)
+    monkeypatch.setattr(cli, "selected_model", lambda state: "model/x")
+    monkeypatch.setattr(cli, "build_harness_env", lambda *a: dict(env))
+    monkeypatch.setattr(cli, "resolve_model_token_limits", lambda _model: (None, None))
+
+    c = _Console()
+    monkeypatch.setattr(cli, "console", c)
+    seen = {}
+
+    def fake_exec(harness, args, env, backend=None):
+        seen["env"] = env
+        return 0
+
+    monkeypatch.setattr(cli, "exec_harness", fake_exec)
+    return c, seen
+
+
+def _printed(console):
+    return [str(args[0]) for args, _kwargs in console.messages]
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", "off", "debug"])
+def test_launch_harness_prints_no_debug_output_unless_enabled(monkeypatch, value):
+    monkeypatch.setenv("CAR_DEBUG", value)
+    c, seen = _stub_launch_harness(
+        monkeypatch, "claude", {"ANTHROPIC_AUTH_TOKEN": "super-secret", "ANTHROPIC_MODEL": "m"},
+    )
+
+    assert cli.launch_harness([]) == 0
+    assert c.messages == []
+    assert seen["env"]["ANTHROPIC_MODEL"] == "m"
+
+
+@pytest.mark.parametrize("value", ["1", "true", "YES", " On "])
+def test_launch_harness_debug_prints_claude_routing_env_and_masks_tokens(monkeypatch, value):
+    monkeypatch.setenv("CAR_DEBUG", value)
+    # Real env construction, so this follows whatever claude_env sets for OpenRouter routing.
+    env = harness_module.build_harness_env(
+        "claude", "https://openrouter.ai/api/v1", "super-secret", "deepseek/deepseek-r1",
+    )
+    c, _seen = _stub_launch_harness(monkeypatch, "claude", env)
+
+    assert cli.launch_harness(["--print"]) == 0
+
+    lines = _printed(c)
+    assert lines[0].startswith("[debug] cli=") and "harness=claude model=model/x" in lines[0]
+    assert lines[1:] == [
+        "[debug] ANTHROPIC_BASE_URL=https://openrouter.ai/api",
+        "[debug] ANTHROPIC_MODEL=deepseek/deepseek-r1",
+        "[debug] ANTHROPIC_API_KEY=",
+        "[debug] ANTHROPIC_AUTH_TOKEN=<set>",
+        "[debug] ANTHROPIC_CUSTOM_MODEL_OPTION=deepseek/deepseek-r1",
+        "[debug] ANTHROPIC_CUSTOM_MODEL_OPTION_NAME=deepseek-r1",
+    ]
+    assert "super-secret" not in " ".join(lines)
+
+
+def test_launch_harness_debug_reports_empty_token_as_unset_and_skips_absent_vars(monkeypatch):
+    monkeypatch.setenv("CAR_DEBUG", "1")
+    c, _seen = _stub_launch_harness(
+        monkeypatch,
+        "claude",
+        {
+            "ANTHROPIC_AUTH_TOKEN": "",
+            "CLAUDE_CODE_USE_BEDROCK": "1",  # listed: printed as is
+            "UNRELATED_VAR": "not-listed",  # not in the debug list: never printed
+        },
+    )
+
+    assert cli.launch_harness([]) == 0
+
+    assert _printed(c)[1:] == [
+        "[debug] ANTHROPIC_AUTH_TOKEN=<unset>",
+        "[debug] CLAUDE_CODE_USE_BEDROCK=1",
+    ]
+
+
+def test_launch_harness_debug_with_copilot_env_prints_only_the_header(monkeypatch):
+    monkeypatch.setenv("CAR_DEBUG", "1")
+    c, _seen = _stub_launch_harness(monkeypatch, "copilot", {"COPILOT_MODEL": "m"})
+
+    assert cli.launch_harness([]) == 0
+
+    lines = _printed(c)
+    assert len(lines) == 1
+    assert "harness=copilot model=model/x" in lines[0]
 
 
 def test_print_models_and_format_price(monkeypatch):
