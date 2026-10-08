@@ -25,6 +25,14 @@ curl -fsSL https://raw.githubusercontent.com/cornyhorse/car/main/install.sh | ba
 This launches the interactive installer by default.
 Use `--non-interactive` to disable prompts.
 
+Requirements: `git`, `curl` and **Python 3.11 or newer** as `python3` on `PATH`, in both docker and venv
+mode. The installer checks the Python version first and stops with a message (exit 1) before it prompts,
+clones, builds or installs anything when it is older. Docker mode needs it too because the shared tools
+venv (which holds the `mattstash` CLI) is always built with the host `python3`, even though car itself then
+runs in a container. An existing tools venv that was built with an older Python is refused the same way:
+remove `~/.local/share/car/venv-tools` and re-run with a newer `python3`. On macOS the system `python3`
+is 3.9, so use e.g. `brew install python@3.12`.
+
 Installer behavior:
 
 - Prompts for which harness(es) to install: Copilot CLI, Claude Code CLI, or both
@@ -33,7 +41,7 @@ Installer behavior:
 - Prompts for install mode (docker or venv) by default
 - Clones or updates this repo at ~/.local/share/car
 - Creates a shared tools venv at ~/.local/share/car/venv-tools
-- Installs mattstash into that venv (no system Python install)
+- Installs `mattstash>=0.2,<0.3` into that venv (no system Python install); override with `CAR_MATTSTASH_PACKAGE`
 - Installs car into that venv when venv mode is selected
 - Builds the Docker image in docker mode (skips rebuild when git ref and image are unchanged)
 - Installs a wrapper command at ~/.local/bin/car for the selected mode
