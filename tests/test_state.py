@@ -323,6 +323,41 @@ def test_store_openrouter_key_runtime_errors(monkeypatch):
         state.store_openrouter_key(s, "tok")
 
 
+@pytest.mark.parametrize("returncode", [6, 7])
+def test_store_openrouter_key_database_errors_explain_setup(monkeypatch, returncode):
+    s = state.CarState(mattstash_cli="m", key_name="name")
+    completed = subprocess.CompletedProcess(
+        args=["m"],
+        returncode=returncode,
+        stdout="",
+        stderr="No database password available",
+    )
+    monkeypatch.setattr(state.subprocess, "run", lambda *a, **k: completed)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        state.store_openrouter_key(s, "sk-or-v1-secretvalue")
+
+    message = str(excinfo.value)
+    assert "No database password available" in message
+    assert "mattstash setup --sidecar" in message
+    assert "KDBX_PASSWORD_FILE" in message
+    assert "secretvalue" not in message
+
+
+@pytest.mark.parametrize("returncode", [1, 2, 8])
+def test_store_openrouter_key_other_errors_have_no_setup_hint(monkeypatch, returncode):
+    s = state.CarState(mattstash_cli="m", key_name="name")
+    completed = subprocess.CompletedProcess(
+        args=["m"], returncode=returncode, stdout="", stderr="denied"
+    )
+    monkeypatch.setattr(state.subprocess, "run", lambda *a, **k: completed)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        state.store_openrouter_key(s, "tok")
+
+    assert str(excinfo.value) == "mattstash put failed: denied"
+
+
 def test_store_openrouter_key_detects_readback_mismatch(monkeypatch):
     s = state.CarState(mattstash_cli="m", key_name="name")
 

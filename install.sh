@@ -17,7 +17,11 @@ CAR_FORCE="${CAR_FORCE:-0}"
 CAR_CONFIGURE_KEYS="${CAR_CONFIGURE_KEYS:-ask}"
 CAR_ENABLE_MATTSTASH_PROFILE="${CAR_ENABLE_MATTSTASH_PROFILE:-ask}"
 CAR_TOOLS_VENV="${CAR_TOOLS_VENV:-$HOME/.local/share/car/venv-tools}"
-CAR_MATTSTASH_PACKAGE="${CAR_MATTSTASH_PACKAGE:-mattstash}"
+# mattstash 0.2.x (and car itself) require Python >= 3.11. Older interpreters are not supported:
+# main() runs require_supported_python before anything is installed.
+CAR_MIN_PYTHON_MAJOR=3
+CAR_MIN_PYTHON_MINOR=11
+CAR_MATTSTASH_PACKAGE="${CAR_MATTSTASH_PACKAGE:-mattstash>=0.2,<0.3}"
 CAR_MATTSTASH_KEY_NAME="${CAR_MATTSTASH_KEY_NAME:-openrouter_api_key}"
 
 CAR_TOOLS_PYTHON="$CAR_TOOLS_VENV/bin/python"
@@ -49,6 +53,63 @@ check_python_venv_available() {
     printf '[car-install] Then re-run this installer.\n' >&2
     exit 1
   fi
+}
+
+# Prints the "X.Y.Z" version of the interpreter given as $1 (nothing when it cannot be run).
+python_version_of() {
+  "$1" -c 'import sys; print(".".join(str(part) for part in sys.version_info[:3]))' 2>/dev/null \
+    | head -n 1 || true
+}
+
+# True when the "X.Y[.Z]" version given as $1 is at least CAR_MIN_PYTHON_MAJOR.CAR_MIN_PYTHON_MINOR.
+python_version_supported() {
+  local major minor
+  if [[ ! "$1" =~ ^([0-9]+)\.([0-9]+) ]]; then
+    return 1
+  fi
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  [ "$major" -gt "$CAR_MIN_PYTHON_MAJOR" ] \
+    || { [ "$major" -eq "$CAR_MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$CAR_MIN_PYTHON_MINOR" ]; }
+}
+
+# Fail early, before anything is cloned, built or installed, when the interpreter that backs the
+# tools venv is older than Python 3.11. That is the host python3 for a new venv (docker mode
+# builds this venv too, even though car itself then runs in a container), or the venv's own
+# interpreter when a healthy venv is reused.
+require_supported_python() {
+  local minimum="${CAR_MIN_PYTHON_MAJOR}.${CAR_MIN_PYTHON_MINOR}"
+  local interpreter="python3"
+  local description="python3"
+  local version
+
+  if venv_is_healthy; then
+    interpreter="$CAR_TOOLS_PYTHON"
+    description="the existing tools venv at $CAR_TOOLS_VENV"
+  fi
+
+  version="$(python_version_of "$interpreter")"
+  if [ -z "$version" ]; then
+    printf '[car-install] Could not determine the Python version of %s (%s).\n' "$description" "$interpreter" >&2
+    printf '[car-install] Python %s or newer is required (mattstash 0.2 and car need it).\n' "$minimum" >&2
+    exit 1
+  fi
+
+  if python_version_supported "$version"; then
+    log "Using Python $version for the tools venv"
+    return 0
+  fi
+
+  printf '[car-install] Python %s or newer is required (mattstash 0.2 and car need it), but %s is Python %s.\n' \
+    "$minimum" "$description" "$version" >&2
+  if [ "$interpreter" = "python3" ]; then
+    printf '[car-install] Install Python %s or newer so that "python3" on PATH is new enough, then re-run this installer.\n' "$minimum" >&2
+    printf '[car-install] For example: "brew install python@3.12" on macOS, or your distribution'"'"'s python3.12 package on Linux.\n' >&2
+  else
+    printf '[car-install] Remove the old venv (rm -rf "%s"), make sure "python3" on PATH is Python %s or newer,\n' "$CAR_TOOLS_VENV" "$minimum" >&2
+    printf '[car-install] then re-run this installer.\n' >&2
+  fi
+  exit 1
 }
 
 check_docker_running() {
@@ -560,24 +621,55 @@ ensure_harnesses_installed() {
   fi
 }
 
+# mattstash >= 0.1.20 prompts for a master password on `setup` unless told otherwise (and fails
+# without a terminal, e.g. `curl ... | bash`). car reads the key non-interactively on every run,
+# so create the database with a sidecar password file, which is what older releases always did.
+# Releases before 0.1.20 have no --sidecar flag; for those, plain `setup` is used.
+mattstash_setup_args() {
+  local help_text
+  help_text="$("$CAR_MATTSTASH_CLI" setup --help 2>&1 || true)"
+  case "$help_text" in
+    *--sidecar*) printf '%s' 'setup --sidecar' ;;
+    *) printf '%s' 'setup' ;;
+  esac
+}
+
 ensure_mattstash_initialized() {
   if "$CAR_MATTSTASH_CLI" keys >/dev/null 2>&1; then
     return 0
   fi
 
+  local setup_args
+  setup_args="$(mattstash_setup_args)"
+
   if ! can_prompt; then
     warn "mattstash is not initialized and non-interactive mode is enabled"
-    warn "Run manually: $CAR_MATTSTASH_CLI setup"
+    warn "Run manually: $CAR_MATTSTASH_CLI $setup_args"
     return 1
   fi
 
-  if prompt_yes_no "mattstash is not initialized. Run mattstash setup now?" "y"; then
-    "$CAR_MATTSTASH_CLI" setup
-    return 0
-  else
+  if ! prompt_yes_no "mattstash is not initialized. Run mattstash setup now?" "y"; then
     warn "Skipping mattstash setup; key storage may fail until setup is completed"
     return 1
   fi
+
+  local rc=0
+  # shellcheck disable=SC2086 # setup_args is two fixed words
+  "$CAR_MATTSTASH_CLI" $setup_args || rc=$?
+  case "$rc" in
+    0)
+      return 0
+      ;;
+    8)
+      warn "mattstash setup refused to overwrite existing files"
+      warn "If a database already exists, provide its master password (KDBX_PASSWORD or KDBX_PASSWORD_FILE) and re-run"
+      return 1
+      ;;
+    *)
+      warn "mattstash setup failed (exit $rc); key storage may fail until setup is completed"
+      return 1
+      ;;
+  esac
 }
 
 persist_key_name() {
@@ -767,7 +859,8 @@ configure_mattstash_profile() {
 
   log "Optional mattstash profile is available in docker-compose.yml"
   log "Start it with: docker compose --profile mattstash up -d mattstash"
-  log "Required env before startup: KDBX_PASSWORD and MATTSTASH_API_KEY"
+  log "Required env before startup: KDBX_PASSWORD and MATTSTASH_API_KEY (at least 32 characters)"
+  log "The server never creates a database: ~/.credentials/mattstash.kdbx must already exist"
 }
 
 warm_model_cache() {
@@ -791,6 +884,8 @@ main() {
   parse_args "$@"
   require_cmd git
   require_cmd curl
+  require_cmd python3
+  require_supported_python
 
   choose_install_mode
   choose_harness
@@ -800,7 +895,6 @@ main() {
     check_docker_running
     check_docker_compose_available
   else
-    require_cmd python3
     check_python_venv_available
   fi
 
